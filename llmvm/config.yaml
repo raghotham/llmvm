@@ -25,6 +25,7 @@ executor: 'anthropic'  # openai, anthropic, gemini, deepseek, bedrock
 override_max_input_tokens: None
 override_max_output_tokens: None
 full_processing: true
+
 helper_functions:
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
@@ -65,6 +66,13 @@ helper_functions:
   - llmvm.server.tools.search_tool.Search.bluesky_search
   - llmvm.server.tools.search_tool.Search.yelp_search
   - llmvm.server.tools.search_tool.Search.hackernews_search
+  - llmvm.server.tools.database.DatabaseHelpers.connect_database
+  - llmvm.server.tools.database.DatabaseHelpers.query_database
+  - llmvm.server.tools.database.DatabaseHelpers.get_database_schema
+  - llmvm.server.tools.database.DatabaseHelpers.get_business_context
+  - llmvm.server.tools.database.DatabaseHelpers.suggest_analysis_queries
+  - llmvm.server.tools.database.DatabaseHelpers.add_insight
+  - llmvm.server.tools.database.DatabaseHelpers.clear_cache
 
 # optional client color Python rich syntax
 client_stream_token_color: '#dddddd'

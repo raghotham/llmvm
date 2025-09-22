@@ -3001,6 +3001,10 @@ class Helpers():
         append_token: str = '',
         module: str = 'llmvm.server.prompts.python'
     ) -> Dict[str, Any]:
+        # Use execution mode to select the appropriate prompt for tool_execution.prompt
+        if prompt_name == 'tool_execution.prompt':
+            prompt_name = Helpers.get_execution_mode_prompt('tool_execution.prompt')
+
         prompt: Dict[str, Any] = Helpers.load_resources_prompt(prompt_name, module)
 
         try:
@@ -3060,6 +3064,21 @@ class Helpers():
                 'templates': []
             }
             return result
+
+    @staticmethod
+    def get_execution_mode_prompt(default_prompt: str = 'tool_execution.prompt') -> str:
+        """
+        Get the appropriate prompt based on LLMVM_MODE environment variable.
+        Falls back to default_prompt if not set.
+
+        Usage: LLMVM_MODE=data_scientist python -m llmvm.server
+        """
+        mode = os.getenv('LLMVM_MODE', 'general')
+
+        if mode == 'data_scientist':
+            return 'data_scientist_expert.prompt'
+        else:
+            return default_prompt
 
     @staticmethod
     def prompt_user(

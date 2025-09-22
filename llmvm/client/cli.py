@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import textwrap
 import threading
 import time
 from importlib import resources
@@ -16,7 +15,6 @@ from typing import Optional, Sequence, cast
 
 import click
 import httpx
-import jsonpickle
 import nest_asyncio
 import pyperclip
 import rich
@@ -25,8 +23,6 @@ from click_default_group import DefaultGroup
 from httpx import ConnectError
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import Completer as PromptCompleter
-from prompt_toolkit.completion import Completion as PromptCompletion
 from prompt_toolkit.completion import WordCompleter, merge_completers
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -49,7 +45,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import serialize_messages, setup_logging
 from llmvm.common.objects import (Assistant, DownloadItemModel, ImageContent,
                                   MarkdownContent, Message, MessageModel,
-                                  PdfContent, SessionThreadModel, TextContent, HTMLContent, TokenCompressionMethod, TokenPriceCalculator,
+                                  PdfContent, SessionThreadModel, TextContent, TokenCompressionMethod, TokenPriceCalculator,
                                   User)
 
 invoke_context = None
@@ -281,7 +277,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 rich.print(f'File {filename} does not exist. Creating.')
 
             elif prompt and not filename:
-                rich.print(f'No filename for diff specified by LLM. Filename? ', end='')
+                rich.print('No filename for diff specified by LLM. Filename? ', end='')
                 filename = input()
                 answer = 'y'
 
@@ -417,12 +413,16 @@ class Repl():
         rich.print(f'Named pipe: {pipe_path}')
         rich.print('[bold]Keys:[/bold]')
         rich.print('[white](Ctrl-c or "exit" to exit, or cancel current request)[/white]')
+        rich.print('[white](Ctrl-a move cursor to beginning of line)[/white]')
+        rich.print('[white](Ctrl-e move cursor to end of line)[/white]')
+        rich.print('[white](Ctrl-o open $EDITOR for multi-line editing)[/white]')
+        rich.print('[white](Ctrl-k delete from cursor to end of line)[/white]')
+        rich.print('[white](Ctrl-u delete from start of line to cursor, or toggle python mode if empty)[/white]')
+        rich.print('[white](Ctrl-w delete word before cursor)[/white]')
         rich.print('[white](Ctrl-n to create a new thread)[/white]')
-        rich.print('[white](Ctrl-e to open $EDITOR for multi-line User prompt)[/white]')
         rich.print('[white](Ctrl-g to open $EDITOR for full message thread editing)[/white]')
         rich.print('[white](Ctrl-r search prompt history)[/white]')
         rich.print('[white](Ctrl-i multi-line repl toggle)[/white]')
-        rich.print('[white](Ctrl-u python in current thread repl toggle)[/white]')
         rich.print('[white](Ctrl-y+y yank the last message to the clipboard)[/white]')
         rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
         rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
@@ -472,12 +472,61 @@ class Repl():
         kb = KeyBindings()
         current_mode = 'tools'
 
+        # Bash-style navigation shortcuts (work in both Vi and Emacs modes)
+        @kb.add('c-a')
+        def _(event):
+            """Move cursor to beginning of line (like bash)"""
+            event.current_buffer.cursor_position = 0
+
         @kb.add('c-e')
         def _(event):
+            """Move cursor to end of line (like bash)"""
+            event.current_buffer.cursor_position = len(event.current_buffer.text)
+
+        @kb.add('c-o')
+        def _(event):
+            """Open external editor for multi-line editing"""
             editor = os.environ.get('EDITOR', 'vim')
             text = self.open_editor(editor, event.app.current_buffer.text)
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
+
+        @kb.add('c-k')
+        def _(event):
+            """Kill (delete) from cursor to end of line"""
+            buffer = event.current_buffer
+            buffer.text = buffer.text[:buffer.cursor_position]
+
+        @kb.add('c-u')
+        def _(event):
+            """Kill (delete) from beginning of line to cursor or toggle python mode if line is empty"""
+            buffer = event.current_buffer
+            if buffer.cursor_position == 0 and len(buffer.text) == 0:
+                # Empty line - toggle python mode (original Ctrl+U behavior)
+                python_enabled[0] = not python_enabled[0]
+                rich.print('Switching python mode ' + ('on' if python_enabled[0] else 'off'))
+                self.__redraw(event)
+            else:
+                # Delete from start to cursor
+                buffer.text = buffer.text[buffer.cursor_position:]
+                buffer.cursor_position = 0
+
+        @kb.add('c-w')
+        def _(event):
+            """Delete word before cursor"""
+            buffer = event.current_buffer
+            text = buffer.text
+            pos = buffer.cursor_position
+
+            # Find start of current word
+            while pos > 0 and text[pos - 1] == ' ':
+                pos -= 1
+            while pos > 0 and text[pos - 1] != ' ':
+                pos -= 1
+
+            # Delete from word start to cursor
+            buffer.text = text[:pos] + text[buffer.cursor_position:]
+            buffer.cursor_position = pos
 
         @kb.add('escape', 'm')
         def _(event):
@@ -539,7 +588,7 @@ class Repl():
             from PIL import ImageGrab  # type: ignore
             try:
                 im = ImageGrab.grabclipboard()
-            except Exception as ex:
+            except Exception:
                 im = None
 
             if im is not None:
@@ -603,7 +652,7 @@ class Repl():
                     last_thread = asyncio.run(
                         llmvm_client.get_thread(thread_id)
                     )
-                except Exception as ex:
+                except Exception:
                     pass
 
             thread_text = get_string_thread_with_roles(last_thread)
@@ -788,7 +837,7 @@ class Repl():
 
                 if query.startswith(':.'):
                     thread_id = last_thread.id
-                    directory = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default=f'~/.local/share/llmvm/memory/')
+                    directory = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory/')
                     # macos only?
                     if not os.path.exists(directory):
                         os.makedirs(directory)
@@ -1398,7 +1447,7 @@ def act(
         thread_id = last_thread.id
         try:
             asyncio.run(llmvm_client.set_thread(last_thread))
-        except Exception as ex:
+        except Exception:
             pass
         return last_thread
 
@@ -1438,7 +1487,7 @@ def url(
             session_thread = SessionThreadModel.model_validate(objs[-1])
             return session_thread
 
-        except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
+        except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout):
             if 'last_thread' not in globals():
 
                 with click.Context(new) as ctx:

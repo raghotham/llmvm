@@ -1,5 +1,6 @@
 import asyncio
 from enum import Enum
+import json
 import os
 import time
 from typing import Any, Awaitable, Callable, Optional, Union, cast
@@ -511,6 +512,23 @@ class LLMVMClient():
                     f'{self.llmvm_endpoint}/v1/tools/completions',
                     json=thread.model_dump(),
                 ) as response:
+                    # Check for HTTP errors before processing stream
+                    if response.status_code >= 400:
+                        error_content = await response.aread()
+                        try:
+                            error_data = json.loads(error_content.decode('utf-8'))
+                            if 'error' in error_data:
+                                # Extract meaningful error message from server response
+                                error_msg = error_data['error']
+                                if 'AuthenticationError' in error_msg:
+                                    raise Exception("Authentication failed: Invalid API key. Please check your API key configuration.")
+                                else:
+                                    raise Exception(f"Server error: {error_msg}")
+                            else:
+                                raise Exception(f"HTTP {response.status_code}: {error_content.decode('utf-8')}")
+                        except json.JSONDecodeError:
+                            raise Exception(f"HTTP {response.status_code}: {error_content.decode('utf-8')}")
+
                     objs = await stream_response(response, stream_handler)
 
             await response.aclose()

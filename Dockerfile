@@ -1,5 +1,5 @@
-FROM debian:11.5
-WORKDIR /home/llmvm/llmvm
+FROM python:3.12-slim
+WORKDIR /llmvm
 
 # we grab the keys from the terminal environment
 # use the --build-arg flag to pass in the keys
@@ -13,58 +13,32 @@ ARG LLMVM_SERVER_PORT=8011
 ARG NGINX_PORT=8080
 
 ENV container docker
-ENV PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LLMVM_SERVER_PORT=${LLMVM_SERVER_PORT}
 ENV NGINX_PORT=${NGINX_PORT}
 
-RUN useradd -m -d /home/llmvm -s /bin/bash -G sudo llmvm
+RUN useradd -m -d /llmvm -s /bin/bash llmvm
 RUN mkdir -p /var/run/sshd
 RUN mkdir -p /run/sshd
-RUN mkdir -p /tmp
 
-# some of these aren't acually required.
-RUN apt-get update
-RUN apt-get install -y dialog apt-utils
-RUN apt-get install -y python3
-RUN apt-get install -y python3-pip
-RUN apt-get install -y git
-RUN apt-get install -y wget
-RUN apt-get install -y vim
-RUN apt-get install -y dpkg
-RUN apt-get install -y build-essential
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    openssh-server \
+    rsync \
+    poppler-utils \
+    build-essential \
+    nginx \
+    gettext-base \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get install -y linux-headers-generic
-RUN apt-get install -y lzip curl
-RUN apt-get install -y locales-all
-RUN apt-get install -y openssh-server
-RUN apt-get install -y sudo
-RUN apt-get install -y unzip
-RUN apt-get install -y expect
-RUN apt-get install -y iproute2
-RUN apt-get install -y net-tools
-RUN apt-get install -y rsync
-RUN apt-get install -y iputils-ping
-RUN apt-get install -y lnav
-RUN apt-get install -y poppler-utils
-RUN apt-get install -y gosu
-
-# required for building Python and some packages
-RUN apt-get install -y libbz2-dev
-RUN apt-get install -y libsqlite3-dev
-RUN apt-get install -y libreadline-dev
-RUN apt-get install -y libedit-dev
-RUN apt-get install -y libncurses5-dev
-RUN apt-get install -y libssl-dev
-RUN apt-get install -y libffi-dev
-RUN apt-get install -y liblzma-dev
-
-# Install Node.js and nginx for the web application
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-RUN apt-get install -y nodejs
-RUN apt-get install -y nginx
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs
 
 RUN echo 'llmvm:llmvm' | chpasswd
 RUN service ssh start
@@ -77,25 +51,18 @@ EXPOSE 8011
 EXPOSE 8080
 
 # copy over the source and data
-COPY ./ /home/llmvm/llmvm/
+COPY ./ /llmvm/
 
-RUN apt-get update -y
+RUN mkdir -p /llmvm/.config/llmvm \
+    /llmvm/.tmp \
+    /llmvm/.cache \
+    /llmvm/.local/share/llmvm/cache \
+    /llmvm/.local/share/llmvm/download \
+    /llmvm/.local/share/llmvm/logs \
+    /llmvm/.local/share/llmvm/memory \
+    /llmvm/.ssh
 
-RUN mkdir /home/llmvm/.config
-RUN mkdir /home/llmvm/.config/llmvm
-RUN mkdir /home/llmvm/.tmp
-RUN mkdir /home/llmvm/.cache
-RUN mkdir /home/llmvm/.local
-RUN mkdir /home/llmvm/.local/share
-RUN mkdir /home/llmvm/.local/share/llmvm
-RUN mkdir /home/llmvm/.local/share/llmvm/cache
-RUN mkdir /home/llmvm/.local/share/llmvm/download
-RUN mkdir /home/llmvm/.local/share/llmvm/logs
-RUN mkdir /home/llmvm/.local/share/llmvm/memory
-RUN mkdir /home/llmvm/.ssh
-
-RUN chown -R llmvm:llmvm /home/llmvm
-RUN chsh -s /bin/bash llmvm
+RUN chown -R llmvm:llmvm /llmvm
 
 # Create a separate SSH config for standard shell access
 RUN mkdir -p /etc/ssh/sshd_config.d
@@ -104,72 +71,44 @@ RUN sed -i 's/^#Port 22/Port 2222/' /etc/ssh/sshd_config_standard
 RUN sed -i '/Match User llmvm/,/ForceCommand/d' /etc/ssh/sshd_config_standard
 RUN echo 'PidFile /var/run/sshd_standard.pid' >> /etc/ssh/sshd_config_standard
 
-# install miniconda and Python 3.13.2
+# Switch to llmvm user
 USER llmvm
 
-ENV HOME /home/llmvm
-ENV TMPDIR $HOME/.tmp
+ENV HOME /llmvm
+ENV TMPDIR /llmvm/.tmp
 
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-        MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh"; \
-    else \
-        echo "Unsupported architecture: $ARCH" && exit 1; \
-    fi && \
-    wget -q "$MINIFORGE_URL" -O ~/miniforge.sh && \
-    bash ~/miniforge.sh -b -p $HOME/miniforge && \
-    rm ~/miniforge.sh
+WORKDIR /llmvm
 
-# Add conda to PATH
-ENV PATH=$HOME/miniforge/bin:$PATH
+# Install uv
+RUN pip install uv
 
-# Initialize conda for bash
-RUN conda init bash
-
-# setup defaults for bash
-
-RUN echo 'if [ -f ~/.bashrc ]; then\n   source ~/.bashrc\nfi' >> /home/llmvm/.bash_profile
-# Add conda initialization to .bashrc
-RUN echo 'export PATH="$HOME/miniforge/bin:$PATH"' >> /home/llmvm/.bashrc
-RUN echo 'cd llmvm' >> /home/llmvm/.bashrc
-
-WORKDIR /home/llmvm/llmvm
-
-# Create conda environment with Python 3.13.2
-RUN conda create -n llmvm python=3.13.2 -y
-
-# Activate the environment
-SHELL ["conda", "run", "-n", "llmvm", "/bin/bash", "-c"]
-
-# Install requirements
-RUN conda run -n llmvm pip install -r requirements.txt
-RUN conda run -n llmvm pip install playwright
+# Install requirements using uv
+RUN uv sync --frozen
+RUN uv run pip install playwright
 
 # Switch to root to install playwright system dependencies
 USER root
-RUN playwright install-deps
+RUN uv run playwright install-deps
 USER llmvm
 
-COPY ./llmvm/config.yaml /home/llmvm/.config/llmvm/config.yaml
+COPY ./llmvm/config.yaml /llmvm/.config/llmvm/config.yaml
 
-RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "LLAMA_API_KEY=$LLAMA_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /llmvm/.ssh/environment
+RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /llmvm/.ssh/environment
+RUN echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> /llmvm/.ssh/environment
+RUN echo "LLAMA_API_KEY=$LLAMA_API_KEY" >> /llmvm/.ssh/environment
+RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /llmvm/.ssh/environment
+RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /llmvm/.ssh/environment
 
-RUN conda run -n llmvm bash -c "playwright install"
+RUN uv run playwright install
 
 # Build the SDK first
-WORKDIR /home/llmvm/llmvm/web/js-llmvm-sdk
+WORKDIR /llmvm/web/js-llmvm-sdk
 RUN npm install
 RUN npm run build
 
 # Build the website
-WORKDIR /home/llmvm/llmvm/web/llmvm-chat-studio
+WORKDIR /llmvm/web/llmvm-chat-studio
 # Add the SDK as a local dependency and install
 RUN npm install ../js-llmvm-sdk
 RUN npm install
@@ -178,15 +117,14 @@ RUN npm run build
 RUN cp public/config.js.template dist/config.js.template
 
 # Copy the wrapper script from the scripts directory and make it executable
-WORKDIR /home/llmvm/llmvm
-COPY --chmod=755 ./scripts/llmvm-client-wrapper.sh /home/llmvm/llmvm-client-wrapper.sh
+WORKDIR /llmvm
+COPY --chmod=755 ./scripts/llmvm-client-wrapper.sh /llmvm/llmvm-client-wrapper.sh
 
 # spin back to root, to start sshd
 USER root
 
 # Configure nginx
 COPY ./docker/nginx.conf.template /etc/nginx/sites-available/llmvm-web.template
-RUN apt-get install -y gettext-base
 RUN ln -s /etc/nginx/sites-available/llmvm-web /etc/nginx/sites-enabled/
 RUN rm -f /etc/nginx/sites-enabled/default
 
@@ -196,14 +134,14 @@ RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config_standard
 
 # Configure SSH to use the wrapper script as the shell for the llmvm user
 RUN echo 'Match User llmvm' >> /etc/ssh/sshd_config_standard && \
-    echo '    ForceCommand /home/llmvm/llmvm-client-wrapper.sh' >> /etc/ssh/sshd_config_standard
+    echo '    ForceCommand /llmvm/llmvm-client-wrapper.sh' >> /etc/ssh/sshd_config_standard
 
-WORKDIR /home/llmvm/llmvm
+WORKDIR /llmvm
 
 ENTRYPOINT service ssh restart; \
     envsubst '${NGINX_PORT}' < /etc/nginx/sites-available/llmvm-web.template > /etc/nginx/sites-available/llmvm-web; \
-    envsubst '${LLMVM_SERVER_PORT}' < /home/llmvm/llmvm/web/llmvm-chat-studio/dist/config.js.template > /home/llmvm/llmvm/web/llmvm-chat-studio/dist/config.js; \
+    envsubst '${LLMVM_SERVER_PORT}' < /llmvm/web/llmvm-chat-studio/dist/config.js.template > /llmvm/web/llmvm-chat-studio/dist/config.js; \
     service nginx start; \
     /usr/sbin/sshd -f /etc/ssh/sshd_config; \
     /usr/sbin/sshd -f /etc/ssh/sshd_config_standard; \
-    sudo -E -u llmvm bash -c 'source ~/.bashrc; cd /home/llmvm/llmvm; conda activate llmvm; LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_PROFILING="true" python -m llmvm.server.server'
+    runuser -u llmvm -- bash -c 'cd /llmvm; LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="/llmvm/.local/share/llmvm/executor.trace" LLMVM_PROFILING="true" uv run python -m llmvm.server.server'

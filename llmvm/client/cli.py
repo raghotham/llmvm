@@ -410,6 +410,14 @@ class Repl():
         rich.print(f'$LLMVM_FULL_PROCESSING: {str(Container.get_config_variable("LLMVM_FULL_PROCESSING", default="(not set)")).lower()}')
         rich.print(f'$LLMVM_PROFILING: {str(Container.get_config_variable("LLMVM_PROFILING", default="(not set)")).lower()}')
         rich.print()
+
+        # Debug: Show detected terminal theme and colors being used
+        from llmvm.common.logging_helpers import detect_terminal_background, get_theme_colors
+        detected_theme = detect_terminal_background()
+        theme_colors_debug = get_theme_colors()
+        config_repl_color = Container.get_config_variable('client_repl_color', default=theme_colors_debug['client_repl_color'])
+        rich.print(f'[dim]Terminal theme detected: {detected_theme}, using REPL color: {config_repl_color}[/dim]')
+
         rich.print(f'Named pipe: {pipe_path}')
         rich.print('[bold]Keys:[/bold]')
         rich.print('[white](Ctrl-c or "exit" to exit, or cancel current request)[/white]')
@@ -759,11 +767,15 @@ class Repl():
                 if token_count > 0:
                     repl_stats = f'[id: {thread_id} n_toks: {token_count}] {repl_mode}>> '
 
+                # Get theme-aware colors
+                from llmvm.common.logging_helpers import get_theme_colors
+                theme_colors = get_theme_colors()
+
                 query = await session.prompt_async(
                     repl_stats,
                     complete_while_typing=True,
                     style=Style.from_dict({
-                        'prompt': Container.get_config_variable('client_repl_color', default='')
+                        'prompt': Container.get_config_variable('client_repl_color', default=theme_colors['client_repl_color'])
                     })
                 )
 
@@ -1013,6 +1025,13 @@ class Repl():
                 if os.path.exists(pipe_path):
                     os.remove(pipe_path)
                 break
+            except EOFError:
+                # Handle Ctrl-D gracefully
+                rich.print("\nGoodbye!")
+                pipe_event.set()
+                if os.path.exists(pipe_path):
+                    os.remove(pipe_path)
+                break
             except Exception:
                 console.print_exception(max_frames=10)
                 pipe_event.set()
@@ -1199,7 +1218,12 @@ def todo(
 ):
     global thread_id
     global last_thread
-    role_color = Container().get_config_variable('client_role_color', default='cyan')
+
+    # Get theme-aware colors
+    from llmvm.common.logging_helpers import get_theme_colors
+    theme_colors = get_theme_colors()
+
+    role_color = Container().get_config_variable('client_role_color', default=theme_colors['client_role_color'])
 
     if not os.path.exists(filename):
         rich.print(f'[{role_color}]Todo file {filename} does not exist, creating.[/{role_color}]')

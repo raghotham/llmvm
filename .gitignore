@@ -1,6 +1,5 @@
 .python-version
 .repl_history
-poetry.lock
 uv.lock
 .vscode/
 __pycache__/

@@ -114,8 +114,15 @@ class StreamPrinter():
         self.buffer = ''
         self.console = Console(file=file)
         self.markdown_mode = False
-        self.token_color = Container.get_config_variable('client_stream_token_color', default='bright_black')
-        self.thinking_token_color = Container.get_config_variable('client_stream_thinking_token_color', default='cyan')
+
+        # Get theme-aware colors
+        from llmvm.common.logging_helpers import get_theme_colors
+        theme_colors = get_theme_colors()
+
+        self.token_color = Container.get_config_variable('client_stream_token_color',
+                                                       default=theme_colors['client_stream_token_color'])
+        self.thinking_token_color = Container.get_config_variable('client_stream_thinking_token_color',
+                                                                 default=theme_colors['client_stream_thinking_token_color'])
         self.inline_markdown_render = Container.get_config_variable('client_markdown_inline', default=False)
         self.current_line = ''
         self.line_count = 0
@@ -441,7 +448,12 @@ class StreamPrinter():
 
 class ConsolePrinter:
     def __init__(self, file=sys.stdout):
-        client_assistant_color = Container.get_config_variable('client_assistant_color', default='white')
+        # Get theme-aware colors
+        from llmvm.common.logging_helpers import get_theme_colors
+        theme_colors = get_theme_colors()
+
+        client_assistant_color = Container.get_config_variable('client_assistant_color',
+                                                             default=theme_colors['client_assistant_color'])
         custom_theme = Theme({
             "default": client_assistant_color
         })
@@ -528,8 +540,12 @@ class ConsolePrinter:
                     cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
 
-        role_color = Container.get_config_variable('client_role_color', default='bold cyan')
-        assistant_color = Container.get_config_variable('client_assistant_color', default='white')
+        # Get theme-aware colors
+        from llmvm.common.logging_helpers import get_theme_colors
+        theme_colors = get_theme_colors()
+
+        role_color = Container.get_config_variable('client_role_color', default=theme_colors['client_role_color'])
+        assistant_color = Container.get_config_variable('client_assistant_color', default=theme_colors['client_assistant_color'])
 
         for message in messages:
             if escape:

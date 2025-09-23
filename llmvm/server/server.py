@@ -87,6 +87,96 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def get_expected_helpers():
+    """Get the expected helpers from the configuration"""
+    try:
+        return set(Container().get('helper_functions', []))
+    except Exception:
+        return set()
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring server status"""
+    try:
+        # Check if helpers are initialized
+        if not globals().get('helpers'):
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unhealthy", "reason": "helpers not initialized", "timestamp": dt.datetime.now().isoformat()}
+            )
+
+        helpers_list = globals().get('helpers', [])
+        if len(helpers_list) == 0:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unhealthy", "reason": "no helpers loaded", "timestamp": dt.datetime.now().isoformat()}
+            )
+
+        # Get the actual loaded helper names
+        loaded_helpers = set()
+        for helper in helpers_list:
+            if hasattr(helper, '__name__'):
+                loaded_helpers.add(helper.__name__)
+            elif hasattr(helper, 'func') and hasattr(helper.func, '__name__'):
+                loaded_helpers.add(helper.func.__name__)
+
+        # Get expected helpers from config
+        expected_helpers = get_expected_helpers()
+
+        # Check status of each expected helper
+        helper_status = {}
+        missing_helpers = []
+
+        for expected_helper in expected_helpers:
+            # Extract just the function name for matching
+            helper_name = expected_helper.split('.')[-1] if '.' in expected_helper else expected_helper
+
+            if helper_name in loaded_helpers or expected_helper in loaded_helpers:
+                helper_status[expected_helper] = "loaded"
+            else:
+                helper_status[expected_helper] = "missing"
+                missing_helpers.append(expected_helper)
+
+        # Add any extra loaded helpers not in expected list
+        for loaded_helper in loaded_helpers:
+            full_name = f"extra.{loaded_helper}"
+            if not any(expected.endswith(loaded_helper) for expected in expected_helpers):
+                helper_status[full_name] = "loaded"
+
+        # Determine overall health
+        total_expected = len(expected_helpers)
+        total_loaded = len([h for h in helper_status.values() if h == "loaded"])
+        missing_count = len(missing_helpers)
+
+        if missing_count > 0:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "unhealthy",
+                    "reason": f"{missing_count}/{total_expected} helpers missing",
+                    "helpers_status": helper_status,
+                    "missing_helpers": missing_helpers,
+                    "loaded_count": total_loaded,
+                    "expected_count": total_expected,
+                    "timestamp": dt.datetime.now().isoformat()
+                }
+            )
+
+        return {
+            "status": "healthy",
+            "helpers_status": helper_status,
+            "loaded_count": total_loaded,
+            "expected_count": total_expected,
+            "timestamp": dt.datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "reason": str(e), "timestamp": dt.datetime.now().isoformat()}
+        )
+
 global helpers, mcp_helpers
 
 # Initialize helpers as a list that can be updated
@@ -131,7 +221,7 @@ if (
     and not os.environ.get('LLAMA_API_KEY')
 ):
     rich.print('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, BEDROCK_API_KEY, DEEPSEEK_API_KEY, or LLAMA_API_KEY are set.')
-    rich.print('One of these API keys needs to be set in your terminal environment[/red]')
+    rich.print('[red]One of these API keys needs to be set in your terminal environment[/red]')
     sys.exit(1)
 
 
@@ -542,7 +632,24 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
     async def stream():
         def handle_exception(task):
             if not task.cancelled() and task.exception() is not None:
-                Helpers.log_exception(logging, task.exception())
+                exception = task.exception()
+                Helpers.log_exception(logging, exception)
+
+                # Send error message to client instead of just breaking
+                error_str = str(exception)
+                if "AuthenticationError" in error_str or "authentication_error" in error_str:
+                    error_msg = "❌ Authentication failed: Invalid API key. Please check your API key configuration."
+                elif "invalid x-api-key" in error_str:
+                    error_msg = "❌ Authentication failed: Invalid API key. Please check your API key configuration."
+                else:
+                    error_msg = f"❌ Server error: {exception}"
+
+                # Send error as a token/stream node that the client can display
+                from llmvm.common.objects import TokenNode, TokenStopNode
+                error_token = TokenNode(error_msg + "\n")
+                queue.put_nowait(error_token)
+                # Add a stop token to ensure the error message gets flushed/displayed
+                queue.put_nowait(TokenStopNode())
                 queue.put_nowait(QueueBreakNode())
 
         async def execute_and_signal() -> list[Message]:
@@ -1063,7 +1170,24 @@ async def chat_completions(request: Request):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     logging.exception(exc)
-    return JSONResponse(content={"error": f"Unhandled exception: {exc}"})
+
+    # Check for authentication errors and provide better error messages
+    error_str = str(exc)
+    if "AuthenticationError" in error_str or "authentication_error" in error_str:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication failed: Invalid API key. Please check your API key configuration."}
+        )
+    elif "invalid x-api-key" in error_str:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication failed: Invalid API key. Please check your API key configuration."}
+        )
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Server error: {exc}"}
+        )
 
 
 if __name__ == '__main__':

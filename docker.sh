@@ -166,8 +166,8 @@ run() {
     --tmpfs /run \
     --tmpfs /run/lock \
     -v /lib/modules:/lib/modules:ro \
-    -v ~/.config/gspread/credentials.json:/home/llmvm/.config/gspread/credentials.json \
-    -v ~/.config/gspread/authorized_user.json:/home/llmvm/.config/gspread/authorized_user.json \
+    -v ~/.config/gspread/credentials.json:/llmvm/.config/gspread/credentials.json \
+    -v ~/.config/gspread/authorized_user.json:/llmvm/.config/gspread/authorized_user.json \
     -d $IMGNAME
 
   echo ""
@@ -229,9 +229,9 @@ sync() {
     exit 1
   fi
   echo "container id: $CONTID"
-  echo " $ rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/home/llmvm/llmvm/ --exclude='.git' --filter=\"dir-merge,- .gitignore\""
+  echo " $ rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/llmvm/ --exclude='.git' --filter=\"dir-merge,- .gitignore\""
   echo ""
-  rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/home/llmvm/llmvm/ --exclude='.git' --filter="dir-merge,- .gitignore"
+  rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/llmvm/ --exclude='.git' --filter="dir-merge,- .gitignore"
 }
 
 sync_all() {
@@ -243,9 +243,9 @@ sync_all() {
     exit 1
   fi
   echo "container id: $CONTID"
-  echo " $ rsync -e 'docker exec -i' -av $BUILDDIR/ $CONTID:/home/llmvm/llmvm/ --exclude='.git'"
+  echo " $ rsync -e 'docker exec -i' -av $BUILDDIR/ $CONTID:/llmvm/ --exclude='.git'"
   echo ""
-  rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/home/llmvm/llmvm/ --exclude='.git'
+  rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/llmvm/ --exclude='.git'
 }
 
 echo "build: $b, clean: $c, run: $r, force: $f, sync: $s, sync_all: $a, go: $g, image_name: $IMGNAME, container_name: $CONTNAME, port: $LLMVM_PORT, web_port: $NGINX_PORT"

@@ -335,6 +335,48 @@ pip install llmvm-cli
 playwright install
 ```
 
+### Using the Unified LLMVM CLI
+
+LLMVM provides a unified CLI command (`llmvm`) that starts both server and client together, similar to Claude Code. This is the recommended way to run LLMVM:
+
+```bash
+# Basic usage (server and client managed together)
+uv run llmvm
+
+# With environment variables for configuration
+LLMVM_MODE=data_scientist \
+LLMVM_CONFIG=./llmvm/config.yaml \
+LLMVM_EXECUTOR=openai \
+LLMVM_MODEL=gpt-5 \
+OPENAI_API_KEY=`cat ~/.openai/key` \
+uv run --refresh llmvm
+
+# Server management commands
+uv run llmvm --status   # Show server status
+uv run llmvm --logs     # Show server logs
+uv run llmvm --stop     # Stop the server
+
+# With different modes
+LLMVM_MODE=tools uv run llmvm        # Default mode with tool access
+LLMVM_MODE=direct uv run llmvm       # Direct mode without tools
+LLMVM_MODE=data_scientist uv run llmvm  # Data scientist mode with verification
+
+# Port and logging configuration
+uv run llmvm --port 8012 --log-level DEBUG
+```
+
+The unified CLI automatically:
+- Starts the server if not already running
+- Waits for server health checks to pass
+- Launches the client connected to the server
+- Shuts down the server when the client exits
+- Handles all cleanup on exit
+
+Available modes:
+- `tools`: Default mode with access to all helper functions and browser automation
+- `direct`: Direct LLM mode without tool access
+- `data_scientist`: Specialized mode that emphasizes code verification and data analysis
+
 [Optional]
 
 * Install [viu](https://github.com/atanunq/viu) for image rendering in macos/linux terminals ```cargo install viu```

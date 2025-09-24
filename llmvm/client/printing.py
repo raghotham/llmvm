@@ -2,6 +2,7 @@ import asyncio
 import base64
 import html
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -160,7 +161,16 @@ class StreamPrinter:
         if len(image_bytes) < 10:
             return
         try:
-            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+            # Determine file extension based on image type
+            file_extension = '.png'  # Default to PNG
+            if Helpers.is_webp(image_bytes):
+                file_extension = '.webp'
+            elif image_bytes[:3] == b'\xff\xd8\xff':  # JPEG magic bytes
+                file_extension = '.jpg'
+            elif image_bytes[:8] == b'\x89PNG\r\n\x1a\n':  # PNG magic bytes
+                file_extension = '.png'
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
                 # Check for Kitty
                 kitty_path = Helpers.find_kitty()
                 if (
@@ -226,7 +236,36 @@ class StreamPrinter:
                     temp_file.write(image_bytes)
                     temp_file.flush()
                     subprocess.run([viu_path, temp_file.name], stdout=sys.stderr)
+                    return  # Done displaying with viu
+
+                # Final fallback: open in system's default image viewer
+                import platform
+                temp_file.write(image_bytes)
+                temp_file.flush()
+
+                system = platform.system()
+                if system == "Darwin":  # macOS
+                    subprocess.run(["open", temp_file.name])
+                    self.console.print(f"[dim]Image opened in default viewer: {temp_file.name}[/dim]")
+                elif system == "Linux":
+                    # Try xdg-open first (most common), then alternatives
+                    if shutil.which("xdg-open"):
+                        subprocess.run(["xdg-open", temp_file.name])
+                    elif shutil.which("xv"):
+                        subprocess.run(["xv", temp_file.name])
+                    elif shutil.which("eog"):
+                        subprocess.run(["eog", temp_file.name])
+                    else:
+                        self.console.print(f"[yellow]No image viewer found. Image saved to: {temp_file.name}[/yellow]")
+                        return
+                    self.console.print(f"[dim]Image opened in default viewer: {temp_file.name}[/dim]")
+                elif system == "Windows":
+                    subprocess.run(["start", temp_file.name], shell=True)
+                    self.console.print(f"[dim]Image opened in default viewer: {temp_file.name}[/dim]")
+                else:
+                    self.console.print(f"[yellow]Unsupported platform. Image saved to: {temp_file.name}[/yellow]")
         except Exception as e:
+            logging.debug(f"Error displaying image: {e}")
             return
 
     def _clear_current_line(self):

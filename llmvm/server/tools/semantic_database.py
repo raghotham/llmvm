@@ -193,7 +193,7 @@ This database contains {total_tables} tables and appears to be a {'business/ecom
             full_semantic_doc = "\n".join(semantic_docs)
 
             # Create vector store and upload semantic understanding
-            vector_store = client.beta.vector_stores.create(
+            vector_store = client.vector_stores.create(
                 name=f"Semantic DB: {db_name}",
                 expires_after={"anchor": "last_active_at", "days": 30}  # Auto-cleanup after 30 days
             )
@@ -212,7 +212,7 @@ This database contains {total_tables} tables and appears to be a {'business/ecom
                     )
 
                 # Add file to vector store
-                client.beta.vector_stores.files.create(
+                client.vector_stores.files.create(
                     vector_store_id=vector_store.id,
                     file_id=file_upload.id
                 )
@@ -255,17 +255,17 @@ The database semantic knowledge is now available for intelligent querying and an
             return f"Error creating semantic understanding for {db_path}: {str(e)}"
 
     @staticmethod
-    def semantic_query(db_path: str, natural_language_query: str) -> str:
+    def get_semantic_context(db_path: str, natural_language_query: str) -> str:
         """
-        Query the database using natural language, leveraging semantic understanding.
+        Search the semantic vector store for relevant database context.
 
         Example:
-        result = SemanticDatabaseHelpers.semantic_query('./ecommerce.db',
-                                                        'What are the top customers by revenue?')
+        context = SemanticDatabaseHelpers.get_semantic_context('./ecommerce.db',
+                                                              'What are the top customers by revenue?')
 
         :param db_path: Path to the database file
         :param natural_language_query: Natural language question about the database
-        :return: SQL query suggestions and analysis
+        :return: Relevant semantic context from the vector store
         """
         SemanticDatabaseHelpers._load_cache_from_disk()
         cache_key = SemanticDatabaseHelpers._get_cache_key(db_path)
@@ -277,56 +277,57 @@ The database semantic knowledge is now available for intelligent querying and an
             client = SemanticDatabaseHelpers._get_openai_client()
             vector_store_id = SemanticDatabaseHelpers._vector_store_cache[cache_key]['vector_store_id']
 
-            # Create assistant with file search capabilities
-            assistant = client.beta.assistants.create(
-                name="Database Query Assistant",
-                instructions="""You are an expert data analyst and SQL specialist. You have access to comprehensive semantic documentation about a database.
-
-Your job is to:
-1. Understand the user's natural language question
-2. Analyze the database schema and relationships
-3. Suggest appropriate SQL queries
-4. Explain the reasoning behind your suggestions
-5. Provide insights about what the query results might reveal
-
-Always provide working SQL that can be executed against the database.""",
-                model="gpt-4o",
-                tools=[{"type": "file_search"}],
-                tool_resources={"file_search": {"vector_store_ids": [vector_store_id]}}
+            # Search the vector store directly
+            search_results = client.vector_stores.search(
+                vector_store_id=vector_store_id,
+                query=natural_language_query,
+                max_num_results=5
             )
 
-            # Create thread and ask question
-            thread = client.beta.threads.create()
+            # Extract relevant context from search results
+            context_chunks = []
+            for result in search_results.data:
+                context_chunks.append(f"Score: {result.score:.3f}\n{result.content}")
 
-            client.beta.threads.messages.create(
-                thread_id=thread.id,
-                role="user",
-                content=f"Based on the database schema and structure, help me with this query: {natural_language_query}"
-            )
+            if not context_chunks:
+                return "No relevant semantic context found for this query."
 
-            # Run assistant
-            run = client.beta.threads.runs.create(
-                thread_id=thread.id,
-                assistant_id=assistant.id
-            )
-
-            # Wait for completion and get response
-            import time
-            while run.status in ['queued', 'in_progress']:
-                time.sleep(1)
-                run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-
-            # Get messages
-            messages = client.beta.threads.messages.list(thread_id=thread.id)
-            response = messages.data[0].content[0].text.value
-
-            # Cleanup
-            client.beta.assistants.delete(assistant.id)
-
-            return response
+            context = "\n\n---\n\n".join(context_chunks)
+            return f"Semantic database context for: '{natural_language_query}'\n\n{context}"
 
         except Exception as e:
-            return f"Error processing semantic query: {str(e)}"
+            return f"Error searching semantic context: {str(e)}"
+
+    @staticmethod
+    def generate_verification_queries(db_path: str, original_query: str) -> List[str]:
+        """
+        Generate alternative SQL queries that should yield consistent results for verification.
+
+        Example:
+        verification_queries = SemanticDatabaseHelpers.generate_verification_queries(
+            './ecommerce.db', 'Top 10 customers by revenue'
+        )
+
+        :param db_path: Path to the database file
+        :param original_query: The original natural language query to verify
+        :return: List of alternative query approaches for cross-validation
+        """
+        context = SemanticDatabaseHelpers.get_semantic_context(
+            db_path,
+            f"Generate 3-5 alternative SQL approaches to answer: '{original_query}'. "
+            f"Focus on different table joins, aggregation methods, or calculation approaches "
+            f"that should yield the same or consistent results. Consider: "
+            f"1. Different join paths to the same data "
+            f"2. Alternative aggregation methods "
+            f"3. Subquery vs CTE approaches "
+            f"4. Different date/time groupings "
+            f"5. Cross-validation through inverse queries"
+        )
+
+        if "Error searching semantic context" in context:
+            return [f"Could not generate verification queries: {context}"]
+
+        return [context]
 
     @staticmethod
     def get_semantic_suggestions(db_path: str, context: str = "general analysis") -> List[str]:
@@ -340,7 +341,7 @@ Always provide working SQL that can be executed against the database.""",
         :param context: Context for suggestions (e.g., 'revenue analysis', 'customer insights')
         :return: List of suggested analyses and queries
         """
-        result = SemanticDatabaseHelpers.semantic_query(
+        result = SemanticDatabaseHelpers.get_semantic_context(
             db_path,
             f"Suggest 5-10 meaningful SQL queries for {context}. Focus on business insights and actionable metrics."
         )

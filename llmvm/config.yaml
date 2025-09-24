@@ -73,10 +73,16 @@ helper_functions:
   - llmvm.server.tools.database.DatabaseHelpers.suggest_analysis_queries
   - llmvm.server.tools.database.DatabaseHelpers.add_insight
   - llmvm.server.tools.database.DatabaseHelpers.clear_cache
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.create_semantic_understanding
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.get_semantic_context
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.generate_verification_queries
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.get_semantic_suggestions
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.clear_semantic_cache
 
 # optional client color Python rich syntax
-client_stream_token_color: '#dddddd'
-client_stream_thinking_token_color: '#5f819d'
-client_role_color: 'bold cyan'
-client_repl_color: 'ansibrightcyan'
+client_stream_token_color: 'dim'
+client_stream_thinking_token_color: 'gray'
+client_role_color: 'bold bright_blue'
+client_repl_color: 'ansibrightblue'
+client_assistant_color: 'default'
 client_markdown_inline: true

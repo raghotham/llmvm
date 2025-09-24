@@ -767,6 +767,10 @@ class Repl():
                 if token_count > 0:
                     repl_stats = f'[id: {thread_id} n_toks: {token_count}] {repl_mode}>> '
 
+                # Get theme-aware colors
+                from llmvm.common.logging_helpers import get_theme_colors
+                theme_colors = get_theme_colors()
+
                 query = await session.prompt_async(
                     repl_stats,
                     complete_while_typing=True,

@@ -147,6 +147,7 @@ class StreamPrinter:
             "client_markdown_inline", default=False
         )
         self.current_line = ""
+
         self.line_count = 0
         self.rendered_lines = []
         self.printed_on_current_line = False
@@ -520,6 +521,7 @@ class ConsolePrinter:
             "client_assistant_color", default="default"
         )
         custom_theme = Theme({"default": client_assistant_color})
+
         self.console = Console(file=file)
 
     def print(self, any: Any, end: str = ""):

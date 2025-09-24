@@ -109,6 +109,98 @@ def get_theme_colors():
         }
 
 
+def detect_terminal_background():
+    """Detect if terminal has dark or light background"""
+    # Check for forced theme first
+    forced_theme = os.environ.get('LLMVM_FORCE_THEME', '').lower()
+    if forced_theme in ('light', 'dark'):
+        return forced_theme
+
+    # Try to detect terminal background using various methods
+
+    # Method 1: Check COLORFGBG environment variable (common in many terminals)
+    colorfgbg = os.environ.get('COLORFGBG', '')
+    if colorfgbg:
+        # Format is usually "foreground;background" where higher numbers = lighter
+        parts = colorfgbg.split(';')
+        if len(parts) >= 2:
+            try:
+                bg = int(parts[-1])
+                # In COLORFGBG, 0-7 are typically dark backgrounds, 8-15 are light
+                return 'light' if bg >= 8 else 'dark'
+            except ValueError:
+                pass
+
+    # Method 2: Apple Terminal - use AppleScript to get actual background color
+    term_program = os.environ.get('TERM_PROGRAM', '')
+    if term_program == 'Apple_Terminal':
+        try:
+            import subprocess
+            script = 'tell application "Terminal" to get background color of selected tab of window 1'
+            result = subprocess.run(
+                ['osascript', '-e', script],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=2
+            )
+            # Parse RGB values (16-bit format: 0-65535)
+            colors = result.stdout.strip().split(', ')
+            if len(colors) == 3:
+                r, g, b = [int(c) for c in colors]
+                # Calculate luminance using relative luminance formula
+                # Convert to 0-1 range and apply gamma correction
+                r_norm = (r / 65535) ** 2.2
+                g_norm = (g / 65535) ** 2.2
+                b_norm = (b / 65535) ** 2.2
+                luminance = 0.2126 * r_norm + 0.7152 * g_norm + 0.0722 * b_norm
+                # If luminance > 0.5, it's a light background
+                return 'light' if luminance > 0.5 else 'dark'
+        except Exception:
+            # Fall back to other methods if AppleScript fails
+            pass
+
+    # Method 3: Check terminal program names that typically default to light/dark
+    if 'iterm' in term_program.lower():
+        # iTerm2 usually defaults to dark, but we can't know for sure
+        return 'dark'
+
+    # Method 4: Check if running in VS Code terminal (often light)
+    if os.environ.get('VSCODE_INJECTION') or 'code' in os.environ.get('TERM_PROGRAM', '').lower():
+        return 'light'
+
+    # Default to dark theme (most terminals default to dark)
+    return 'dark'
+
+
+def get_theme_colors():
+    """Get color scheme based on terminal background"""
+    theme = detect_terminal_background()
+
+    if theme == 'light':
+        return {
+            'client_stream_token_color': '#333333',      # Dark gray for light backgrounds
+            'client_stream_thinking_token_color': '#0066cc',  # Blue for light backgrounds
+            'client_role_color': 'bold blue',            # Blue instead of cyan
+            'client_repl_color': 'blue',                 # Blue instead of bright cyan
+            'client_assistant_color': 'black',          # Black text for light backgrounds
+            'client_info_color': 'blue',                # Blue for info text
+            'client_info_bold_color': 'bold blue'       # Bold blue for emphasis
+        }
+    else:
+        return {
+            'client_stream_token_color': '#dddddd',      # Light gray for dark backgrounds
+            'client_stream_thinking_token_color': '#5f819d',  # Original blue-gray
+            'client_role_color': 'bold cyan',            # Original cyan
+            'client_repl_color': 'ansibrightcyan',      # Original bright cyan
+            'client_assistant_color': 'white',          # White text for dark backgrounds
+            'client_info_color': 'bold green',          # Green for info text
+            'client_info_bold_color': 'cyan'            # Cyan for emphasis
+        }
+
+
+
+
 def __trace(content):
     try:
         if Container.get_config_variable("LLMVM_EXECUTOR_TRACE", default=""):

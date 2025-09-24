@@ -1,32 +1,50 @@
+import asyncio
 import base64
 import html
-from io import StringIO
-import sys
-import tempfile
 import os
+import re
 import shutil
 import subprocess
-import re
-import jsonpickle
-import async_timeout
-import asyncio
-import markdown2
+import sys
+import tempfile
+import traceback
+from io import StringIO
 from typing import Any, Awaitable, Callable, cast
 
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.theme import Theme
-from rich.control import Control
-from rich.text import Text
+import async_timeout
+import jsonpickle
+import markdown2
+from llmvm.client.markdown_renderer import markdown__rich_console__
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import BrowserContent, HTMLContent, MarkdownContent, Message, Content, ImageContent, \
-    PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, SessionThreadModel, \
-    MessageModel, TokenThinkingNode, StreamNode
+from llmvm.common.objects import (
+    AstNode,
+    BrowserContent,
+    Content,
+    FileContent,
+    HTMLContent,
+    ImageContent,
+    MarkdownContent,
+    Message,
+    MessageModel,
+    PdfContent,
+    SessionThreadModel,
+    StreamingStopNode,
+    StreamNode,
+    TextContent,
+    TokenNode,
+    TokenStopNode,
+    TokenThinkingNode,
+)
+
+from rich.console import Console
+from rich.control import Control
+from rich.markdown import Markdown
+from rich.text import Text
+from rich.theme import Theme
 
 
 logging = setup_logging()
@@ -44,7 +62,7 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
     async def decode(content: str) -> bool:
         try:
             # Only attempt to decode if content looks like a JSON object.
-            if not content.startswith('{') or not content.endswith('}'):
+            if not content.startswith("{") or not content.endswith("}"):
                 return False
 
             data = jsonpickle.decode(content)
@@ -74,12 +92,14 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
             return False
 
     response_objects = []
-    buffer = ''
+    buffer = ""
     response_iterator = response.aiter_raw()
 
     while True:
         try:
-            raw_bytes = await asyncio.wait_for(response_iterator.__anext__(), timeout=60)
+            raw_bytes = await asyncio.wait_for(
+                response_iterator.__anext__(), timeout=60
+            )
         except asyncio.TimeoutError as ex:
             logging.exception(ex)
             raise ex
@@ -90,10 +110,10 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
             await response.aclose()
             raise ex
 
-        content = raw_bytes.decode('utf-8')
-        content = content.replace('data: ', '').strip()
+        content = raw_bytes.decode("utf-8")
+        content = content.replace("data: ", "").strip()
 
-        if content in ('[DONE]', ''):
+        if content in ("[DONE]", ""):
             continue
         else:
             result = await decode(content)
@@ -102,29 +122,32 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
                 buffer += content
                 result = await decode(buffer)
                 if result:
-                    buffer = ''
+                    buffer = ""
             else:
-                buffer = ''
+                buffer = ""
 
     return response_objects
 
 
-class StreamPrinter():
+class StreamPrinter:
     def __init__(self, file=sys.stderr):
-        self.buffer = ''
+        self.buffer = ""
         self.console = Console(file=file)
         self.markdown_mode = False
 
-        # Get theme-aware colors
-        from llmvm.common.logging_helpers import get_theme_colors
-        theme_colors = get_theme_colors()
+        self.token_color = Container.get_config_variable(
+            "client_stream_token_color",
+            default="dim",
+        )
+        self.thinking_token_color = Container.get_config_variable(
+            "client_stream_thinking_token_color",
+            default="gray",
+        )
+        self.inline_markdown_render = Container.get_config_variable(
+            "client_markdown_inline", default=False
+        )
+        self.current_line = ""
 
-        self.token_color = Container.get_config_variable('client_stream_token_color',
-                                                       default=theme_colors['client_stream_token_color'])
-        self.thinking_token_color = Container.get_config_variable('client_stream_thinking_token_color',
-                                                                 default=theme_colors['client_stream_thinking_token_color'])
-        self.inline_markdown_render = Container.get_config_variable('client_markdown_inline', default=False)
-        self.current_line = ''
         self.line_count = 0
         self.rendered_lines = []
         self.printed_on_current_line = False
@@ -141,41 +164,43 @@ class StreamPrinter():
                 # Check for Kitty
                 kitty_path = Helpers.find_kitty()
                 if (
-                    Helpers.is_emulator('kitty') and kitty_path
+                    Helpers.is_emulator("kitty")
+                    and kitty_path
                     or (
-                        Helpers.is_emulator('tmux')
+                        Helpers.is_emulator("tmux")
                         and kitty_path
-                        and Helpers.is_running('kitty')
+                        and Helpers.is_running("kitty")
                     )
                 ):
                     process = subprocess.Popen(
-                        [kitty_path, 'icat', '--transfer-mode', 'file'],
+                        [kitty_path, "icat", "--transfer-mode", "file"],
                         stdin=subprocess.PIPE,
-                        stdout=temp_file
+                        stdout=temp_file,
                     )
                     process.communicate(input=image_bytes)
                     process.wait()
 
-                    subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
+                    subprocess.run(["cat", temp_file.name], stdout=sys.stderr)
                     return  # Done displaying with kitty
 
                 # Check for WezTerm
                 wezterm_path = Helpers.find_wezterm()
                 if (
-                    Helpers.is_emulator('wezterm') and wezterm_path
+                    Helpers.is_emulator("wezterm")
+                    and wezterm_path
                     or (
-                        Helpers.is_emulator('tmux')
+                        Helpers.is_emulator("tmux")
                         and wezterm_path
-                        and Helpers.is_running('wezterm')
+                        and Helpers.is_running("wezterm")
                     )
                     or (
-                        Helpers.is_emulator('wezterm-gui')
+                        Helpers.is_emulator("wezterm-gui")
                         and wezterm_path
-                        and Helpers.is_running('wezterm-gui')
+                        and Helpers.is_running("wezterm-gui")
                     )
                 ):
                     if not wezterm_path:
-                        logging.debug('wezterm not found')
+                        logging.debug("wezterm not found")
                         return
 
                     if Helpers.is_webp(image_bytes):
@@ -185,18 +210,18 @@ class StreamPrinter():
 
                     if Helpers.is_image(image_bytes):
                         process = subprocess.Popen(
-                            [wezterm_path, 'imgcat'],
+                            [wezterm_path, "imgcat"],
                             stdin=subprocess.PIPE,
-                            stdout=temp_file
+                            stdout=temp_file,
                         )
                         process.communicate(input=image_bytes)
                         process.wait()
 
-                        subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
+                        subprocess.run(["cat", temp_file.name], stdout=sys.stderr)
                     return  # Done displaying with wezterm
 
                 # Fallback to viu if available
-                viu_path = shutil.which('viu')
+                viu_path = shutil.which("viu")
                 if viu_path:
                     temp_file.write(image_bytes)
                     temp_file.flush()
@@ -211,20 +236,22 @@ class StreamPrinter():
             # Get terminal width
             terminal_width = self.console.width
             # Use the tracked printed length for accurate calculation
-            lines_used = max(1, (self.printed_length + terminal_width - 1) // terminal_width)  # Ceiling division
+            lines_used = max(
+                1, (self.printed_length + terminal_width - 1) // terminal_width
+            )  # Ceiling division
 
             # Clear all the lines that were used
             for i in range(lines_used):
                 if i > 0:
                     # Move up one line
-                    self.console.file.write('\033[1A')
+                    self.console.file.write("\033[1A")
                 # Move to beginning of line and clear it
-                self.console.file.write('\r\033[K')
+                self.console.file.write("\r\033[K")
 
             # After clearing, cursor is at the beginning of the first line
         else:
             # Simple case - just clear current line
-            self.console.file.write('\r\033[K')
+            self.console.file.write("\r\033[K")
 
         self.console.file.flush()
         self.printed_on_current_line = False
@@ -233,15 +260,17 @@ class StreamPrinter():
     def _get_visible_length(self, text: str) -> int:
         """Get the visible length of text, excluding ANSI escape sequences"""
         import re
+
         # Remove ANSI escape sequences
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        visible_text = ansi_escape.sub('', text)
+        ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+        visible_text = ansi_escape.sub("", text)
         return len(visible_text)
 
     def _render_line_as_markdown(
-        self, line: str,
+        self,
+        line: str,
         should_highlight_as_python: bool = False,
-        should_highlight_as_diff: bool = False
+        should_highlight_as_diff: bool = False,
     ):
         """Render a line as markdown using rich"""
         if not line.strip():
@@ -253,17 +282,25 @@ class StreamPrinter():
         # Check if this line should be highlighted as Python
         if should_highlight_as_diff:
             text = Text()
-            if line.startswith('+'):
-                text.append(line, style='green')
-            elif line.startswith('-'):
-                text.append(line, style='red')
+            if line.startswith("+"):
+                text.append(line, style="green")
+            elif line.startswith("-"):
+                text.append(line, style="red")
             else:
-                text.append(line, style='default')
+                text.append(line, style="default")
             self.console.print(text)
         elif should_highlight_as_python:
             # Render as Python code with syntax highlighting
             from rich.syntax import Syntax
-            syntax = Syntax(line, "python", theme="monokai", background_color="default", word_wrap=True, padding=0)
+
+            syntax = Syntax(
+                line,
+                "python",
+                theme="monokai",
+                background_color="default",
+                word_wrap=True,
+                padding=0,
+            )
             self.console.print(syntax)
         else:
             # Apply the custom markdown renderer
@@ -275,7 +312,6 @@ class StreamPrinter():
 
         # Store that we've rendered this line
         self.rendered_lines.append(self.line_count)
-
 
     def finalize_stream(self):
         """Finalize the stream by rendering any remaining partial line"""
@@ -289,27 +325,27 @@ class StreamPrinter():
 
         line = line.strip()
 
-        if line == '```' and self.in_code_block:
+        if line == "```" and self.in_code_block:
             self.in_code_block = False
             return False
 
         if (
-            line.startswith('```python') or
-            line.startswith('```javascript') or
-            line.startswith('```html') or
-            line.startswith('```json') or
-            line.startswith('```css') or
-            line.startswith('```digraph') or
-            line.startswith('```mermaid') or
-            line.startswith('```haskell') or
-            line.startswith('```rust') or
-            line.startswith('```java') or
-            line.startswith('```c') or
-            line.startswith('```c++') or
-            line.startswith('```c#') or
-            line.startswith('```ruby') or
-            line.startswith('```php') or
-            line.startswith('```bash')
+            line.startswith("```python")
+            or line.startswith("```javascript")
+            or line.startswith("```html")
+            or line.startswith("```json")
+            or line.startswith("```css")
+            or line.startswith("```digraph")
+            or line.startswith("```mermaid")
+            or line.startswith("```haskell")
+            or line.startswith("```rust")
+            or line.startswith("```java")
+            or line.startswith("```c")
+            or line.startswith("```c++")
+            or line.startswith("```c#")
+            or line.startswith("```ruby")
+            or line.startswith("```php")
+            or line.startswith("```bash")
         ):
             self.in_code_block = True
             return self.in_code_block
@@ -318,15 +354,15 @@ class StreamPrinter():
     def _check_in_diff_block(self, line: str) -> bool:
         line = line.strip()
 
-        if line.startswith('```diff'):
+        if line.startswith("```diff"):
             self.in_diff_block = True
             return self.in_diff_block
 
-        elif line == '```' and self.in_diff_block:
+        elif line == "```" and self.in_diff_block:
             self.in_diff_block = False
             return self.in_diff_block
 
-        elif self.rendered_lines and self.rendered_lines[-1] == '```':
+        elif self.rendered_lines and self.rendered_lines[-1] == "```":
             self.in_diff_block = False
             return self.in_diff_block
 
@@ -336,17 +372,17 @@ class StreamPrinter():
         """Check if line contains opening or closing helpers tags. Returns True if this line should be syntax highlighted."""
         # Check if we're currently in a helpers block or if this line contains helpers tags
         should_highlight = (
-            self.in_helpers_block or
-            '<helpers>' in line or
-            '<helpers_result>' in line or
-            '</helpers>' in line or
-            '</helpers_result>' in line
+            self.in_helpers_block
+            or "<helpers>" in line
+            or "<helpers_result>" in line
+            or "</helpers>" in line
+            or "</helpers_result>" in line
         )
 
         # Update state for next line
-        if '<helpers>' in line or '<helpers_result>' in line:
+        if "<helpers>" in line or "<helpers_result>" in line:
             self.in_helpers_block = True
-        elif '</helpers>' in line or '</helpers_result>' in line:
+        elif "</helpers>" in line or "</helpers_result>" in line:
             self.in_helpers_block = False
 
         return should_highlight
@@ -359,7 +395,7 @@ class StreamPrinter():
                 if isinstance(node.obj, bytes):
                     await self.display_image(node.obj)
                     return
-                raise ValueError(f'StreamNode.obj must be bytes, not {type(node.obj)}')
+                raise ValueError(f"StreamNode.obj must be bytes, not {type(node.obj)}")
             elif isinstance(node, TextContent):
                 string = node.get_str()
             elif isinstance(node, TokenThinkingNode):
@@ -381,16 +417,21 @@ class StreamPrinter():
 
                 if self.inline_markdown_render:
                     # Check if we've hit a newline
-                    if '\n' in string:
+                    if "\n" in string:
                         # Split on newlines
-                        parts = string.split('\n')
+                        parts = string.split("\n")
 
                         # Complete the current line with the first part
                         self.current_line += parts[0]
 
                         # Only print tokens if we haven't already printed on this line
                         if parts[0]:
-                            self.console.print(parts[0], end='', style=f"{token_color}", highlight=False)
+                            self.console.print(
+                                parts[0],
+                                end="",
+                                style=f"{token_color}",
+                                highlight=False,
+                            )
                             self.printed_on_current_line = True
                             self.printed_length += len(parts[0])
 
@@ -399,9 +440,17 @@ class StreamPrinter():
 
                         if self.current_line.strip():
                             # Check for helpers tags before rendering
-                            should_highlight = self._check_helpers_tags(self.current_line) or self._check_in_code_block(self.current_line)
-                            should_diff_highlight = self._check_in_diff_block(self.current_line)
-                            self._render_line_as_markdown(self.current_line, should_highlight, should_diff_highlight)
+                            should_highlight = self._check_helpers_tags(
+                                self.current_line
+                            ) or self._check_in_code_block(self.current_line)
+                            should_diff_highlight = self._check_in_diff_block(
+                                self.current_line
+                            )
+                            self._render_line_as_markdown(
+                                self.current_line,
+                                should_highlight,
+                                should_diff_highlight,
+                            )
                         else:
                             self._clear_current_line()
                             self.console.print()
@@ -411,16 +460,27 @@ class StreamPrinter():
                             self.line_count += 1
                             if parts[i].strip():
                                 # First print the tokens
-                                self.console.print(parts[i], end='', style=f"{token_color}", highlight=False)
+                                self.console.print(
+                                    parts[i],
+                                    end="",
+                                    style=f"{token_color}",
+                                    highlight=False,
+                                )
                                 self.printed_on_current_line = True
                                 self.printed_length = len(parts[i])
                                 # Clear before rendering
                                 self._clear_current_line()
                                 # Check for helpers tags before rendering
-                                should_highlight = self._check_helpers_tags(parts[i]) or self._check_in_code_block(parts[i])
-                                should_diff_highlight = self._check_in_diff_block(self.current_line)
+                                should_highlight = self._check_helpers_tags(
+                                    parts[i]
+                                ) or self._check_in_code_block(parts[i])
+                                should_diff_highlight = self._check_in_diff_block(
+                                    self.current_line
+                                )
                                 # Then render as markdown
-                                self._render_line_as_markdown(parts[i], should_highlight, should_diff_highlight)
+                                self._render_line_as_markdown(
+                                    parts[i], should_highlight, should_diff_highlight
+                                )
                             else:
                                 # Empty line
                                 self.console.print()
@@ -432,34 +492,39 @@ class StreamPrinter():
 
                         # Print the start of the new line if not empty
                         if self.current_line:
-                            self.console.print(self.current_line, end='', style=f"{token_color}", highlight=False)
+                            self.console.print(
+                                self.current_line,
+                                end="",
+                                style=f"{token_color}",
+                                highlight=False,
+                            )
                             self.printed_on_current_line = True
                             self.printed_length = len(self.current_line)
                     else:
                         # No newline - accumulate in current line and print token
                         self.current_line += string
-                        self.console.print(string, end='', style=f"{token_color}", highlight=False)
+                        self.console.print(
+                            string, end="", style=f"{token_color}", highlight=False
+                        )
                         self.printed_on_current_line = True
                         self.printed_length += len(string)
                 else:
                     # Normal mode - just print tokens
-                    self.console.print(string, end='', style=f"{token_color}", highlight=False)
+                    self.console.print(
+                        string, end="", style=f"{token_color}", highlight=False
+                    )
 
 
 class ConsolePrinter:
     def __init__(self, file=sys.stdout):
-        # Get theme-aware colors
-        from llmvm.common.logging_helpers import get_theme_colors
-        theme_colors = get_theme_colors()
+        client_assistant_color = Container.get_config_variable(
+            "client_assistant_color", default="default"
+        )
+        custom_theme = Theme({"default": client_assistant_color})
 
-        client_assistant_color = Container.get_config_variable('client_assistant_color',
-                                                             default=theme_colors['client_assistant_color'])
-        custom_theme = Theme({
-            "default": client_assistant_color
-        })
         self.console = Console(file=file)
 
-    def print(self, any: Any, end: str = ''):
+    def print(self, any: Any, end: str = ""):
         self.console.print(any, end)
 
     def print_exception(self, max_frames: int = 10):
@@ -473,10 +538,20 @@ class ConsolePrinter:
 
     def pprint(self, prepend: str, content_list: list[Content], escape: bool = False):
         def escape_string(input_str):
-            return re.sub(r'"', r'\"', input_str) if escape else input_str
+            return re.sub(r'"', r"\"", input_str) if escape else input_str
+
+        # Debug log for assistant response
+        if prepend and "Assistant" in prepend:
+            from llmvm.common.logging_helpers import setup_logging
+
+            logger = setup_logging(__name__)
+            logger.debug(f"Writing assistant response with prepend: {prepend}")
+            logger.debug(f"Content list has {len(content_list)} items")
+            if content_list:
+                logger.debug(f"First content type: {type(content_list[0]).__name__}")
 
         if prepend:
-            self.console.print(f'{prepend}\n', end='')
+            self.console.print(f"{prepend}\n", end="")
 
         helpers_open = False
         helpers_result_open = False
@@ -484,18 +559,37 @@ class ConsolePrinter:
         def compress(content: Content, compress: bool = False) -> Content:
             if isinstance(content, TextContent) and compress:
                 if len(content.get_str()) > 10000:
-                    return TextContent(content.get_str()[:300] + '\n\n ... \n\n' + content.get_str()[-300:])
+                    return TextContent(
+                        content.get_str()[:300]
+                        + "\n\n ... \n\n"
+                        + content.get_str()[-300:]
+                    )
             return content
 
-        inline_markdown = Helpers.flatten([ObjectTransformers.transform_inline_markdown_to_image_content_list(content) for content in content_list])
+        inline_markdown = Helpers.flatten(
+            [
+                ObjectTransformers.transform_inline_markdown_to_image_content_list(
+                    content
+                )
+                for content in content_list
+            ]
+        )
 
         for content in inline_markdown:
-            if isinstance(content, TextContent) and '<helpers_result>' in content.get_str() or '</helpers_result>' in content.get_str():
-                helpers_result_open = '<helpers_result>' in content.get_str()
+            if (
+                isinstance(content, TextContent)
+                and "<helpers_result>" in content.get_str()
+                or "</helpers_result>" in content.get_str()
+            ):
+                helpers_result_open = "<helpers_result>" in content.get_str()
                 self.console.print(Markdown(content.get_str()))
 
-            elif isinstance(content, TextContent) and '<helpers>' in content.get_str() or '</helpers>' in content.get_str():
-                helpers_open = '<helpers>' in content.get_str()
+            elif (
+                isinstance(content, TextContent)
+                and "<helpers>" in content.get_str()
+                or "</helpers>" in content.get_str()
+            ):
+                helpers_open = "<helpers>" in content.get_str()
                 self.console.print(Markdown(content.get_str()))
 
             elif isinstance(content, ImageContent):
@@ -505,61 +599,99 @@ class ConsolePrinter:
                 Helpers.find_and_run_chrome_with_html(content.get_str())
 
             elif isinstance(content, PdfContent):
-                self.console.print(Markdown(f'[PdfContent({content.url})]'))
+                self.console.print(Markdown(f"[PdfContent({content.url})]"))
 
             elif isinstance(content, FileContent):
-                self.console.print(Markdown(f'[FileContent({content.url})]'))
+                self.console.print(Markdown(f"[FileContent({content.url})]"))
 
             elif isinstance(content, MarkdownContent):
-                self.console.print(Markdown(f'[MarkdownContent({content.url})]'))
+                self.console.print(Markdown(f"[MarkdownContent({content.url})]"))
 
             elif isinstance(content, BrowserContent):
-                self.console.print(Markdown(f'[BrowserContent({content.url})]'))
+                self.console.print(Markdown(f"[BrowserContent({content.url})]"))
 
-            elif isinstance(content, TextContent) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
-                self.console.print(Markdown(compress(content, helpers_open or helpers_result_open).get_str()))
+            elif (
+                isinstance(content, TextContent)
+                and Helpers.is_markdown_simple(content.get_str())
+                and sys.stdout.isatty()
+            ):
+                self.console.print(
+                    Markdown(
+                        compress(content, helpers_open or helpers_result_open).get_str()
+                    )
+                )
 
             else:
-                self.console.print(Markdown(escape_string(f'{compress(content, helpers_open or helpers_result_open).get_str()}')))
+                self.console.print(
+                    Markdown(
+                        escape_string(
+                            f"{compress(content, helpers_open or helpers_result_open).get_str()}"
+                        )
+                    )
+                )
 
-    def print_messages(self, messages: list[Message], escape: bool = False, role_new_line: bool = True):
+    def print_messages(
+        self, messages: list[Message], escape: bool = False, role_new_line: bool = True
+    ):
         # make both ```markdown and markdown'ish responses look like a CodeBlock
         Markdown.__rich_console__ = markdown__rich_console__
 
         def fire_helpers(s: str):
-            if '```digraph' in s:
+            if "```digraph" in s:
                 # fire up graphvis.
-                graphvis_code = Helpers.in_between(s, '```digraph', '```')
-                temp_file = tempfile.NamedTemporaryFile(mode='w+')
+                graphvis_code = Helpers.in_between(s, "```digraph", "```")
+                temp_file = tempfile.NamedTemporaryFile(mode="w+")
                 temp_file.write(graphvis_code)
                 temp_file.flush()
                 # check for linux
-                if sys.platform.startswith('linux'):
-                    cmd = 'dot -Tx11 {}'.format(temp_file.name)
-                elif sys.platform.startswith('darwin'):
-                    cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
+                if sys.platform.startswith("linux"):
+                    cmd = "dot -Tx11 {}".format(temp_file.name)
+                elif sys.platform.startswith("darwin"):
+                    cmd = "dot -Tpdf {} | open -f -a Preview".format(temp_file.name)
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
 
-        # Get theme-aware colors
-        from llmvm.common.logging_helpers import get_theme_colors
-        theme_colors = get_theme_colors()
-
-        role_color = Container.get_config_variable('client_role_color', default=theme_colors['client_role_color'])
-        assistant_color = Container.get_config_variable('client_assistant_color', default=theme_colors['client_assistant_color'])
+        role_color = Container.get_config_variable(
+            "client_role_color", default="bold bright_blue"
+        )
+        assistant_color = Container.get_config_variable(
+            "client_assistant_color", default="default"
+        )
 
         for message in messages:
             if escape:
-                self.pprint('', message.message, escape)
+                self.pprint("", message.message, escape)
             else:
-                self.pprint(f'[{role_color}]{message.role().capitalize()}[/{role_color}]: ', message.message, escape)
+                self.pprint(
+                    f"[{role_color}]{message.role().capitalize()}[/{role_color}]: ",
+                    message.message,
+                    escape,
+                )
 
             if not escape:
                 fire_helpers(message.get_str())
 
-            if not escape and role_new_line: self.console.print('\n', end='')
+            if not escape and role_new_line:
+                self.console.print("\n", end="")
 
-    def print_thread(self, thread: SessionThreadModel, escape: bool = False, role_new_line: bool = True):
-        self.print_messages([MessageModel.to_message(message) for message in thread.messages], escape=escape, role_new_line=role_new_line)
+    def print_thread(
+        self,
+        thread: SessionThreadModel,
+        escape: bool = False,
+        role_new_line: bool = True,
+    ):
+        self.print_messages(
+            [MessageModel.to_message(message) for message in thread.messages],
+            escape=escape,
+            role_new_line=role_new_line,
+        )
+
+
+def print_stack_trace_and_exit():
+    """Print the current stack trace and exit the program."""
+    print("Stack trace:")
+    traceback.print_stack()
+    print("\nExiting...")
+    sys.exit(1)
 
 
 class HTMLMessageRenderer:
@@ -575,8 +707,8 @@ class HTMLMessageRenderer:
     # Language-detection helpers
     # ---------------------------------------------------------------------
 
-    _HELPERS_RE  = re.compile(
-        r"<helpers\b[^>]*>(.*?)</helpers\s*>",           # note \b and [^>]* then \s*
+    _HELPERS_RE = re.compile(
+        r"<helpers\b[^>]*>(.*?)</helpers\s*>",  # note \b and [^>]* then \s*
         re.DOTALL | re.IGNORECASE,
     )
     _HELPERS_RES = re.compile(
@@ -586,23 +718,22 @@ class HTMLMessageRenderer:
 
     def _render_helpers(self, match: re.Match, lang_hint: str | None = "python") -> str:
         """Return a <pre><code …> block that *includes* the wrapper tags."""
-        full_block = match.group(0)                 # <helpers> … </helpers>
-        inner      = match.group(1)
+        full_block = match.group(0)  # <helpers> … </helpers>
+        inner = match.group(1)
         lang = self._detect_language(inner) if lang_hint is None else lang_hint
         if lang is None:
             lang = "plaintext"
 
         escaped = (
             html.escape(full_block)
-                .replace("    ", "&#160;&#160;&#160;&#160;")
-                .replace("\t",  "&#160;&#160;&#160;&#160;")
+            .replace("    ", "&#160;&#160;&#160;&#160;")
+            .replace("\t", "&#160;&#160;&#160;&#160;")
         )
         return f'\n<pre><code class="language-{lang}">{escaped}</code></pre>\n'
 
     _LANG_START_PATTERNS: list[tuple[re.Pattern, str]] = [
         # Bash / shell first because shebang must win
         (re.compile(r"^#!.*\bsh\b"), "bash"),
-
         # -------------------- Python --------------------
         (re.compile(r"^\s*def\s+\w+\s*\(.*\)\s*:"), "python"),
         (re.compile(r"^\s*async\s+def\s+\w+\s*\(.*\)\s*:"), "python"),
@@ -610,22 +741,21 @@ class HTMLMessageRenderer:
         (re.compile(r"^\s*class\s+\w+(\s*\(.*\))?\s*:"), "python"),
         (re.compile(r"^\s*(import|from)\s+[\w\.]+"), "python"),
         (re.compile(r"^\s*@\w+"), "python"),
-
         # ---------------- JavaScript / TypeScript ----------------
         (re.compile(r"^\s*(?:const|let|var)\s+\w+\s*="), "javascript"),
         (re.compile(r"^\s*function\s+\w+\s*\(.*\)\s*\{"), "javascript"),
-        (re.compile(r"^\s*export\s+(?:default\s+)?(?:class|function|const)"), "javascript"),
+        (
+            re.compile(r"^\s*export\s+(?:default\s+)?(?:class|function|const)"),
+            "javascript",
+        ),
         (re.compile(r"^\s*import\s+.+\s+from\s+['\"]"), "javascript"),
-
         # ----------------------- HTML -----------------------
         (re.compile(r"^\s*<!DOCTYPE\s+html>", re.IGNORECASE), "markup"),
         (re.compile(r"^\s*<html\b", re.IGNORECASE), "markup"),
         (re.compile(r"^\s*<\w+[^>]*>"), "markup"),
-
         # ----------------------- JSON -----------------------
         (re.compile(r"^\s*\{[\s\S]*:\s*.+"), "json"),  # rough but effective
         (re.compile(r"^\s*\[[\s\S]*\]$"), "json"),
-
         # ----------------------- CSS ------------------------
         (re.compile(r"^\s*[.#]?[\w-]+\s*\{[^}]*\}"), "css"),
     ]
@@ -639,34 +769,41 @@ class HTMLMessageRenderer:
         text = code_text.strip()
 
         # Python
-        if re.search(r"^\s*def\s+\w+\s*\(.*\)\s*:", text, re.MULTILINE) or \
-           re.search(r"^\s*async\s+def\s+\w+\s*\(.*\)\s*:", text, re.MULTILINE) or \
-           re.search(r"^\s*class\s+\w+(\s*\(.*\))?\s*:", text, re.MULTILINE) or \
-           re.search(r"^\s*(import|from)\s+\w+", text, re.MULTILINE) or \
-           re.search(r"^\s*@\w+", text, re.MULTILINE):
+        if (
+            re.search(r"^\s*def\s+\w+\s*\(.*\)\s*:", text, re.MULTILINE)
+            or re.search(r"^\s*async\s+def\s+\w+\s*\(.*\)\s*:", text, re.MULTILINE)
+            or re.search(r"^\s*class\s+\w+(\s*\(.*\))?\s*:", text, re.MULTILINE)
+            or re.search(r"^\s*(import|from)\s+\w+", text, re.MULTILINE)
+            or re.search(r"^\s*@\w+", text, re.MULTILINE)
+        ):
             return "python"
 
         # JavaScript / TypeScript
-        if re.search(r"(?:const|let|var)\s+\w+\s*=", text) or \
-           re.search(r"function\s+\w+\s*\(.*\)\s*\{", text) or \
-           re.search(r"=>\s*\{", text) or \
-           re.search(r"import\s+.*\s+from\s+['\"]", text) or \
-           re.search(r"export\s+(?:default\s+)?(?:class|function|const)", text):
+        if (
+            re.search(r"(?:const|let|var)\s+\w+\s*=", text)
+            or re.search(r"function\s+\w+\s*\(.*\)\s*\{", text)
+            or re.search(r"=>\s*\{", text)
+            or re.search(r"import\s+.*\s+from\s+['\"]", text)
+            or re.search(r"export\s+(?:default\s+)?(?:class|function|const)", text)
+        ):
             return "javascript"
 
         # HTML (Prism registers HTML/XML as "markup")
-        if re.search(r"<!DOCTYPE\s+html>", text, re.IGNORECASE) or \
-           re.search(r"<html\b", text, re.IGNORECASE):
+        if re.search(r"<!DOCTYPE\s+html>", text, re.IGNORECASE) or re.search(
+            r"<html\b", text, re.IGNORECASE
+        ):
             return "markup"
 
         # JSON
-        if (text.startswith("{") and text.endswith("}")) or \
-           (text.startswith("[") and text.endswith("]")):
+        if (text.startswith("{") and text.endswith("}")) or (
+            text.startswith("[") and text.endswith("]")
+        ):
             return "json"
 
         # Bash
-        if re.search(r"^#!.*\bsh\b", text) or \
-           re.search(r"^\s*echo\s+", text, re.MULTILINE):
+        if re.search(r"^#!.*\bsh\b", text) or re.search(
+            r"^\s*echo\s+", text, re.MULTILINE
+        ):
             return "bash"
 
         # CSS
@@ -697,13 +834,14 @@ class HTMLMessageRenderer:
         parts: list[str] = []
         role = message.role().lower()
         parts.append(f'<div class="message {role}">')
-        parts.append("    <div class=\"message-header\">")
+        parts.append('    <div class="message-header">')
         parts.append(f"        <h2>{message.role().capitalize()}</h2>")
         parts.append("    </div>")
-        parts.append("    <div class=\"message-body\">")
+        parts.append('    <div class="message-body">')
 
         # ── coalesce adjacent TextContent so helper-blocks stay intact ──
         buf: list[str] = []
+
         def _flush():
             if buf:
                 joined = "\n".join(buf)
@@ -719,14 +857,19 @@ class HTMLMessageRenderer:
                     md = content.get_str()
                     if len(md) > 10000:
                         md = md[:300] + "\n\n … \n\n" + md[-300:]
-                    parts.append(markdown2.markdown(md, extras=["tables", "fenced-code-blocks", "break-on-newline"]))
+                    parts.append(
+                        markdown2.markdown(
+                            md,
+                            extras=["tables", "fenced-code-blocks", "break-on-newline"],
+                        )
+                    )
                 elif isinstance(content, ImageContent):
                     # NB: base64 import omitted for brevity; assume in scope
                     parts.append(
                         f'<div class="image-container">\n'
                         f'<img src="data:{content.image_type};base64,'
                         f'{base64.b64encode(content.sequence).decode()}" alt="{content.url}" />\n'
-                        f'</div>'
+                        f"</div>"
                     )
                 # TODO: other content types (BrowserContent, FileContent, …) as required
         _flush()
@@ -755,12 +898,14 @@ class HTMLMessageRenderer:
         # 1) fenced  ```lang\n … ```  --------------------------------------
         def fenced_repl(match: re.Match) -> str:
             lang_hint = match.group(1).strip()
-            code      = match.group(2)
-            lang      = lang_hint or self._detect_language(code)
+            code = match.group(2)
+            lang = lang_hint or self._detect_language(code)
 
             escaped = html.escape(code)
             if lang == "python":
-                escaped = escaped.replace("    ", "&#160;&#160;&#160;&#160;").replace("\t", "&#160;&#160;&#160;&#160;")
+                escaped = escaped.replace("    ", "&#160;&#160;&#160;&#160;").replace(
+                    "\t", "&#160;&#160;&#160;&#160;"
+                )
             return f'<pre><code class="language-{lang}">{escaped}</code></pre>'
 
         text = re.sub(r"```([\w-]*)\n([\s\S]*?)```", fenced_repl, text)
@@ -771,7 +916,9 @@ class HTMLMessageRenderer:
 
         # ------------------------------------------------------------------
         # 3) inline   `code`   ---------------------------------------------
-        text = re.sub(r'`([^`]+)`', lambda m: f'<code>{html.escape(m.group(1))}</code>', text)
+        text = re.sub(
+            r"`([^`]+)`", lambda m: f"<code>{html.escape(m.group(1))}</code>", text
+        )
 
         # ------------------------------------------------------------------
         # 4) markdown conversion  ------------------------------------------
@@ -807,7 +954,7 @@ class HTMLMessageRenderer:
 
         lines = text.splitlines()
         n = len(lines)
-        out: list[str] = []        # <--- here’s the missing variable
+        out: list[str] = []  # <--- here’s the missing variable
         i = 0
         in_pre = False
 
@@ -846,11 +993,13 @@ class HTMLMessageRenderer:
 
                 i += 1
                 while i < n and (
-                    lines[i].strip() == ""                       # blank line
-                    or lines[i].startswith((" ", "\t"))          # indented
-                    or lines[i].lstrip().startswith(("#", "//")) # comment
-                    or any(pat.search(lines[i])                  # OR *another*
-                        for pat, _ in self._LANG_START_PATTERNS)  # code line
+                    lines[i].strip() == ""  # blank line
+                    or lines[i].startswith((" ", "\t"))  # indented
+                    or lines[i].lstrip().startswith(("#", "//"))  # comment
+                    or any(
+                        pat.search(lines[i])  # OR *another*
+                        for pat, _ in self._LANG_START_PATTERNS
+                    )  # code line
                 ):
                     block.append(lines[i])
                     i += 1
@@ -870,7 +1019,6 @@ class HTMLMessageRenderer:
                 i += 1
 
         return "\n".join(out)
-
 
 
 class HTMLPrinter:
@@ -1144,21 +1292,18 @@ class HTMLPrinter:
         return val
 
     def print(self, s: str):
-        with open(self.filename, 'w') as f:
+        with open(self.filename, "w") as f:
             f.write(s)
 
     def print_messages(
-        self,
-        messages: list[Message],
-        escape: bool = False,
-        role_new_line: bool = True
+        self, messages: list[Message], escape: bool = False, role_new_line: bool = True
     ):
-        with open(self.filename, 'w') as f:
+        with open(self.filename, "w") as f:
             f.write(self.get_str(messages))
 
     def markdown_to_html(self, m: str) -> str:
-        if '```markdown' in m:
-            m = m.replace('```markdown', '').replace('```', '')
+        if "```markdown" in m:
+            m = m.replace("```markdown", "").replace("```", "")
 
         return markdown2.markdown(
             m,
@@ -1171,4 +1316,3 @@ class HTMLPrinter:
                 "cuddled-lists",
             ],
         )
-

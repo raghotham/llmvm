@@ -420,41 +420,41 @@ class Repl():
 
         rich.print(f'Named pipe: {pipe_path}')
         rich.print('[bold]Keys:[/bold]')
-        rich.print('[white](Ctrl-c or "exit" to exit, or cancel current request)[/white]')
-        rich.print('[white](Ctrl-a move cursor to beginning of line)[/white]')
-        rich.print('[white](Ctrl-e move cursor to end of line)[/white]')
-        rich.print('[white](Ctrl-o open $EDITOR for multi-line editing)[/white]')
-        rich.print('[white](Ctrl-k delete from cursor to end of line)[/white]')
-        rich.print('[white](Ctrl-u delete from start of line to cursor, or toggle python mode if empty)[/white]')
-        rich.print('[white](Ctrl-w delete word before cursor)[/white]')
-        rich.print('[white](Ctrl-n to create a new thread)[/white]')
-        rich.print('[white](Ctrl-g to open $EDITOR for full message thread editing)[/white]')
-        rich.print('[white](Ctrl-r search prompt history)[/white]')
-        rich.print('[white](Ctrl-i multi-line repl toggle)[/white]')
-        rich.print('[white](Ctrl-y+y yank the last message to the clipboard)[/white]')
-        rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
-        rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
-        rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
-        rich.print('[white](yy to yank the last message to the clipboard)[/white]')
-        rich.print('[white](:w filename to save the current thread to a file)[/white]')
-        rich.print('[white](:wh filename to save the current thread as HTML to a file)[/white]')
-        rich.print('[white](:.) to open the LLMVM memory/sandbox directory in finder.')
-        rich.print('[white](:ohc open ```html block in browser)[/white]')
-        rich.print('[white](:omm open ```markdown block in browser)[/white]')
-        rich.print('[white](:otc open message thread in browser)[/white]')
-        rich.print('[white](:omc open last message in browser)[/white]')
-        rich.print('[white](:cb Show all code blocks)[/white]')
-        rich.print('[white](:ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
-        rich.print('[white](:vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
-        rich.print('[white](:sym show all functions that are defined in <helpers> by the LLM)[/white]')
-        rich.print('[white](:csym symbol(arg1,arg2) call the function with arguments)[/white]')
-        rich.print('[white](:py switch python mode to execute python code in the current thread[/white]')
-        rich.print('[white]($ single line python code to execute in the current thread)[/white]')
-        rich.print('[white]($(command) to execute a shell command and capture in query)[/white]')
-        rich.print('[white]($$(command) to execute a shell command and display to screen)[/white]')
+        rich.print('[default](Ctrl-c or Ctrl-d or "exit" to exit, or cancel current request)[/default]')
+        rich.print('[default](Ctrl-a move cursor to beginning of line)[/default]')
+        rich.print('[default](Ctrl-e move cursor to end of line)[/default]')
+        rich.print('[default](Ctrl-o open $EDITOR for multi-line editing)[/default]')
+        rich.print('[default](Ctrl-k delete from cursor to end of line)[/default]')
+        rich.print('[default](Ctrl-u delete from start of line to cursor, or toggle python mode if empty)[/default]')
+        rich.print('[default](Ctrl-w delete word before cursor)[/default]')
+        rich.print('[default](Ctrl-n to create a new thread)[/default]')
+        rich.print('[default](Ctrl-g to open $EDITOR for full message thread editing)[/default]')
+        rich.print('[default](Ctrl-r search prompt history)[/default]')
+        rich.print('[default](Ctrl-i multi-line repl toggle)[/default]')
+        rich.print('[default](Ctrl-y+y yank the last message to the clipboard)[/default]')
+        rich.print('[default](Ctrl-y+a yank entire message thread to clipboard)[/default]')
+        rich.print('[default](Ctrl-y+c yank code blocks to clipboard)[/default]')
+        rich.print('[default](Ctrl-y+p paste image from clipboard into message)[/default]')
+        rich.print('[default](yy to yank the last message to the clipboard)[/default]')
+        rich.print('[default](:w filename to save the current thread to a file)[/default]')
+        rich.print('[default](:wh filename to save the current thread as HTML to a file)[/default]')
+        rich.print('[default](:.) to open the LLMVM memory/sandbox directory in finder.')
+        rich.print('[default](:ohc open ```html block in browser)[/default]')
+        rich.print('[default](:omm open ```markdown block in browser)[/default]')
+        rich.print('[default](:otc open message thread in browser)[/default]')
+        rich.print('[default](:omc open last message in browser)[/default]')
+        rich.print('[default](:cb Show all code blocks)[/default]')
+        rich.print('[default](:ycb0 Copy code block 0, 1, 2... ycb for all)[/default]')
+        rich.print('[default](:vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/default]')
+        rich.print('[default](:sym show all functions that are defined in <helpers> by the LLM)[/default]')
+        rich.print('[default](:csym symbol(arg1,arg2) call the function with arguments)[/default]')
+        rich.print('[default](:py switch python mode to execute python code in the current thread[/default]')
+        rich.print('[default]($ single line python code to execute in the current thread)[/default]')
+        rich.print('[default]($(command) to execute a shell command and capture in query)[/default]')
+        rich.print('[default]($$(command) to execute a shell command and display to screen)[/default]')
         rich.print('')
-        rich.print('[white](If the LLMVM server.py is not running, messages are executed directly)[/white]')
-        rich.print('[white]("message" is the default command, so you can omit it)[/white]')
+        rich.print('[default](If the LLMVM server.py is not running, messages are executed directly)[/default]')
+        rich.print('[default]("message" is the default command, so you can omit it)[/default]')
         rich.print()
         rich.print('[bold]I am a helpful assistant that has access to tools. Use "mode" to switch tools on and off.[/bold]')
         rich.print()
@@ -775,7 +775,7 @@ class Repl():
                     repl_stats,
                     complete_while_typing=True,
                     style=Style.from_dict({
-                        'prompt': Container.get_config_variable('client_repl_color', default=theme_colors['client_repl_color'])
+                        'prompt': Container.get_config_variable('client_repl_color', default='ansibrightblue')
                     })
                 )
 
@@ -1101,7 +1101,7 @@ def status(
     rich.print(asyncio.run(llmvm_client.status()))
 
 
-@cli.command('mode', help='Switch between "tools" and "direct" mode. Direct avoids using LLMVM tools.')
+@cli.command('mode', help='Switch between "tools", "direct", and "data_scientist" mode. Direct avoids using LLMVM tools. Data scientist mode includes specialized data analysis tools.')
 @click.argument('mode', type=str, required=False, default='')
 def mode(
     mode: str,
@@ -1114,11 +1114,12 @@ def mode(
 
     if not mode:
         if current_mode == 'tools': current_mode = 'direct'
-        elif current_mode == 'direct': current_mode = 'tools'
-    elif mode == 'tools' or mode == 'direct':
+        elif current_mode == 'direct': current_mode = 'data_scientist'
+        elif current_mode == 'data_scientist': current_mode = 'tools'
+    elif mode in ['tools', 'direct', 'data_scientist']:
         current_mode = mode
     else:
-        rich.print(f'Invalid mode: {mode}')
+        rich.print(f'Invalid mode: {mode}. Valid modes are: tools, direct, data_scientist')
         return
 
     rich.print(f'Switching mode from {old_mode} to {current_mode}')

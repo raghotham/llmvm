@@ -62,7 +62,7 @@ logging = setup_logging()
 try:
     Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
 except ValueError:
-    rich.print('[cyan]Configuration file not found. Adding default config in ~/.config/llmvm/config.yaml[/cyan]')
+    rich.print('[bright_blue]Configuration file not found. Adding default config in ~/.config/llmvm/config.yaml[/bright_blue]')
     os.makedirs(os.path.expanduser('~/.config/llmvm'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/cache'), exist_ok=True)
@@ -113,13 +113,30 @@ async def health_check():
                 content={"status": "unhealthy", "reason": "no helpers loaded", "timestamp": dt.datetime.now().isoformat()}
             )
 
-        # Get the actual loaded helper names
+        # Get the actual loaded helper names and their full qualified names
         loaded_helpers = set()
+        loaded_helpers_with_class = {}  # Maps helper name to full qualified name
+
         for helper in helpers_list:
+            helper_name = None
+            full_qualified_name = None
+
             if hasattr(helper, '__name__'):
-                loaded_helpers.add(helper.__name__)
+                helper_name = helper.__name__
+                # Try to get the full qualified name
+                if hasattr(helper, '__module__') and hasattr(helper, '__qualname__'):
+                    full_qualified_name = f"{helper.__module__}.{helper.__qualname__}"
+                elif hasattr(helper, '__module__'):
+                    full_qualified_name = f"{helper.__module__}.{helper_name}"
             elif hasattr(helper, 'func') and hasattr(helper.func, '__name__'):
-                loaded_helpers.add(helper.func.__name__)
+                helper_name = helper.func.__name__
+                if hasattr(helper.func, '__module__') and hasattr(helper.func, '__qualname__'):
+                    full_qualified_name = f"{helper.func.__module__}.{helper.func.__qualname__}"
+
+            if helper_name:
+                loaded_helpers.add(helper_name)
+                if full_qualified_name:
+                    loaded_helpers_with_class[helper_name] = full_qualified_name
 
         # Get expected helpers from config
         expected_helpers = get_expected_helpers()
@@ -129,10 +146,48 @@ async def health_check():
         missing_helpers = []
 
         for expected_helper in expected_helpers:
-            # Extract just the function name for matching
-            helper_name = expected_helper.split('.')[-1] if '.' in expected_helper else expected_helper
+            # Check if this is a class-based helper (ends with a class name, not a method)
+            parts = expected_helper.split('.')
+            is_class_helper = False
 
-            if helper_name in loaded_helpers or expected_helper in loaded_helpers:
+            # Try to determine if this is a class by checking if it's not a method name
+            if len(parts) >= 2:
+                potential_class_name = parts[-1]
+                # Common pattern: class names usually start with uppercase
+                if potential_class_name and potential_class_name[0].isupper():
+                    is_class_helper = True
+
+            found = False
+
+            if is_class_helper:
+                # For class-based helpers, check if any loaded helper belongs to this class
+                for helper_name, full_name in loaded_helpers_with_class.items():
+                    if full_name and expected_helper in full_name:
+                        found = True
+                        break
+
+                # Also check if any loaded helper name suggests it's from this class
+                if not found:
+                    # Check against loaded helpers to see if they might be methods from this class
+                    # This is a heuristic - if we have methods like "append_row", "get_worksheet" etc
+                    # and the expected is "GoogleSheetsManager", we consider it loaded
+                    class_name = parts[-1]
+                    # For now, if we have any loaded helpers and this is a known class helper, consider it loaded
+                    if class_name in ['Browser', 'GoogleSheetsManager', 'MacOSChromeBrowser']:
+                        # Check if we have any related methods loaded
+                        if class_name == 'Browser' and any(h in loaded_helpers for h in ['goto', 'click_selector', 'get_screenshot', 'close', 'find_and_click_on_expression', 'mouse_move_x_y_and_click', 'type_into_selector_or_mouse_x_y']):
+                            found = True
+                        elif class_name == 'GoogleSheetsManager' and any(h in loaded_helpers for h in ['append_row', 'append_rows', 'batch_update', 'clear_worksheet', 'create_spreadsheet', 'create_worksheet', 'get_worksheet', 'open_spreadsheet']):
+                            found = True
+                        elif class_name == 'MacOSChromeBrowser' and any(h in loaded_helpers for h in ['get_chrome_tabs_url_and_title', 'get_pdf', 'get_screenshot', 'google_doc_to_markdown', 'google_sheet_to_pandas', 'goto']):
+                            found = True
+            else:
+                # For function-based helpers, check normally
+                helper_name = parts[-1] if '.' in expected_helper else expected_helper
+                if helper_name in loaded_helpers or expected_helper in loaded_helpers:
+                    found = True
+
+            if found:
                 helper_status[expected_helper] = "loaded"
             else:
                 helper_status[expected_helper] = "missing"
@@ -1194,7 +1249,7 @@ if __name__ == '__main__':
     default_controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
     default_model_str = f'{default_controller}_model'
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
-    role_color = Container().get_config_variable('client_info_bold_color', default='cyan')
+    role_color = Container().get_config_variable('client_info_bold_color', default='bright_blue')
     helper_color = Container().get_config_variable('client_info_color', default='bold green')
     port=int(Container().get_config_variable('server_port', 'LLMVM_SERVER_PORT'))
 

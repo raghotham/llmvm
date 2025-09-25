@@ -59,6 +59,7 @@ from llmvm.common.objects import (
 )
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.bash_helper import BashResult
 
 logging = setup_logging()
 
@@ -1200,6 +1201,21 @@ class Runtime:
             self.answers.append(answer)
             return __result(expr)
 
+        # Handle ApprovalRequest specially - stream it directly to client for approval handling
+        from llmvm.common.objects import ApprovalRequest
+        if isinstance(expr, ApprovalRequest):
+            logging.info(f"🔍 runtime.result() APPROVAL DETECTION: found ApprovalRequest")
+            logging.info(f"🔍   command='{expr.command}'")
+            logging.info(f"🔍   content_type='{expr.content_type}'")
+            logging.info(f"🔍   type={type(expr).__name__}")
+            logging.info(f"🔍 runtime.result() calling write_client_stream() with ApprovalRequest")
+
+            write_client_stream(expr)
+
+            logging.info(f"🔍 runtime.result() returned from write_client_stream(), returning ApprovalRequest unchanged")
+            # Don't create Answer yet - wait for approval response
+            return expr
+
         snippet = Helpers.str_get_str(expr).replace("\n", " ")[:150]
 
         # let's check the answer
@@ -1218,6 +1234,42 @@ class Runtime:
         answer = Answer(result=expr)
         self.answers.append(answer)
         return __result(answer)
+
+    def bash(self,
+             command: str,
+             timeout: Optional[int] = None,
+             approval_mode: Optional[str] = None,
+             sandbox_mode: Optional[str] = None,
+             justification: str = None) -> BashResult:
+        """
+        Execute a bash command with approval and sandboxing.
+
+        Args:
+            command: The bash command to execute
+            timeout: Timeout in milliseconds (uses config default if None)
+            approval_mode: "never", "on_request", "on_failure", "unless_trusted" (uses config default if None)
+            sandbox_mode: "read_only", "workspace_write", "danger_full_access" (uses config default if None)
+            justification: Reason for executing this command (optional)
+
+        Returns:
+            BashResult with execution details
+
+        Examples:
+            result = bash("ls -la")
+            result = bash("cat file.txt", justification="Reading configuration")
+            result = bash("rm temp.txt", approval_mode="unless_trusted")
+        """
+        logging.debug(f"Runtime.bash('{command}', timeout={timeout}, approval_mode={approval_mode})")
+
+        # Delegate to BCL.bash
+        from llmvm.server.bcl import BCL
+        return BCL.bash(
+            command=command,
+            timeout=timeout,
+            approval_mode=approval_mode,
+            sandbox_mode=sandbox_mode,
+            justification=justification
+        )
 
 
 global _runtime
@@ -1337,3 +1389,13 @@ def result(expr, check_answer: bool = True) -> Content:
 def print(*args, sep=" ", end="\n", file=None, flush=False):
     global _runtime
     return cast(Runtime, _runtime).print(*args, sep, end, file, flush)
+
+
+def bash(command: str,
+         timeout: Optional[int] = None,
+         approval_mode: Optional[str] = None,
+         sandbox_mode: Optional[str] = None,
+         justification: str = None) -> BashResult:
+    # Delegate to BCL.bash for consistency
+    from llmvm.server.bcl import BCL
+    return BCL.bash(command, timeout, approval_mode, sandbox_mode, justification)

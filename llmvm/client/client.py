@@ -414,7 +414,7 @@ class LLMVMClient():
                     f'{self.llmvm_endpoint}/v1/tools/compile',
                     json=thread_model.model_dump(),
                 ) as response:
-                    objs = await stream_response(response, stream_handler)
+                    objs, _ = await stream_response(response, stream_handler)
 
             await response.aclose()
 
@@ -529,7 +529,7 @@ class LLMVMClient():
                         except json.JSONDecodeError:
                             raise Exception(f"HTTP {response.status_code}: {error_content.decode('utf-8')}")
 
-                    objs = await stream_response(response, stream_handler)
+                    objs, _ = await stream_response(response, stream_handler)
 
             await response.aclose()
 

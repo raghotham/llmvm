@@ -1271,6 +1271,49 @@ class ExecutionController(Controller):
                     and len(code_execution_result) > 0
                 )
 
+                # Handle ApprovalRequest - pause execution and wait for approval
+                from llmvm.common.objects import ApprovalRequest
+                approval_requests = [c for c in code_execution_result if isinstance(c, ApprovalRequest)]
+
+                if approval_requests:
+                    # For now, handle only the first approval request (can be extended later)
+                    approval_request = approval_requests[0]
+                    logging.info(f"🔍 EXECUTION CONTROLLER: Found ApprovalRequest: {approval_request.command}")
+
+                    # Store execution context for later resumption
+                    from llmvm.server.execution_continuation import ExecutionContinuationRegistry
+                    registry = ExecutionContinuationRegistry()
+
+                    execution_id = registry.pause_execution(
+                        approval_request=approval_request,
+                        code_execution_result=code_execution_result,
+                        runtime_state=runtime_state,
+                        messages=messages_copy,
+                        # Original request context
+                        thread_id=getattr(self, 'thread_id', 0),
+                        temperature=temperature,
+                        model=model or "gpt-5",
+                        max_output_tokens=max_output_tokens,
+                        compression=compression,
+                        cookies=cookies,
+                        helpers=helpers,
+                        template_args=template_args,
+                        thinking=getattr(self, 'thinking', False),
+                        # Response handling
+                        stream_handler=stream_handler,
+                        original_queue=getattr(self, 'response_queue', None),
+                        original_controller=self
+                    )
+
+                    # Stream ApprovalRequest to client with execution_id
+                    logging.info(f"🔍   Streaming ApprovalRequest to client with execution_id: {execution_id}")
+                    write_client_stream(approval_request)
+
+                    # Return empty message list - execution paused until approval
+                    logging.info(f"🔍 EXECUTION CONTROLLER: Execution paused, waiting for approval")
+                    return ([], runtime_state)
+
+                # Normal processing for non-approval results
                 # todo: this should be AstNode or TextNode or ...
                 # but for now we're just making it a str()
                 code_execution_result_str = "\n".join(

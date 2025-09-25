@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import Optional
 import traceback
 from io import StringIO
 from typing import Any, Awaitable, Callable, cast
@@ -22,6 +23,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (
+    ApprovalRequest,
     AstNode,
     BrowserContent,
     Content,
@@ -51,7 +53,7 @@ from rich.theme import Theme
 logging = setup_logging()
 
 
-async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> list:
+async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> tuple[list, Optional[SessionThreadModel]]:
     # this was changed mar 6, to support idle timoue so there's streaming issues, this will be the root cause
     def strip_string(s: str) -> str:
         if s.startswith('"'):
@@ -60,7 +62,10 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
             s = s[:-1]
         return s
 
+    updated_thread_from_approval = None
+
     async def decode(content: str) -> bool:
+        nonlocal updated_thread_from_approval
         try:
             # Only attempt to decode if content looks like a JSON object.
             if not content.startswith("{") or not content.endswith("}"):
@@ -73,6 +78,21 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
                 await print_lambda(data)
             elif isinstance(data, TokenNode):
                 await print_lambda(data)
+            elif isinstance(data, ApprovalRequest):
+                # Handle approval requests with interactive prompt
+                approval_granted = await handle_approval_request(data)
+                if approval_granted:
+                    # Send approval response back to server and retry command
+                    updated_thread = await send_approval_response(data, approved=True)
+                    if updated_thread:
+                        # Store the updated thread to return from stream_response
+                        updated_thread_from_approval = updated_thread
+
+                        # Also set the StreamPrinter's _updated_thread if print_lambda is from StreamPrinter
+                        if hasattr(print_lambda, '__self__') and hasattr(print_lambda.__self__, '_updated_thread'):
+                            print_lambda.__self__._updated_thread = updated_thread
+                else:
+                    await print_lambda(f"❌ Command denied: {data.command}")
             elif isinstance(data, TextContent):
                 await print_lambda(data.get_str())
             elif isinstance(data, (TokenStopNode, StreamingStopNode)):
@@ -127,7 +147,7 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
             else:
                 buffer = ""
 
-    return response_objects
+    return response_objects, updated_thread_from_approval
 
 
 class StreamPrinter:
@@ -135,6 +155,8 @@ class StreamPrinter:
         self.buffer = ""
         self.console = Console(file=file)
         self.markdown_mode = False
+        self._updated_thread = None  # Store updated thread from approval flow
+        self._processed_approval_ids = set()  # Track processed approval requests
 
         self.token_color = Container.get_config_variable(
             "client_stream_token_color",
@@ -351,6 +373,10 @@ class StreamPrinter:
 
         # Store that we've rendered this line
         self.rendered_lines.append(self.line_count)
+
+    def get_updated_thread(self):
+        """Get the updated thread from approval flow if available"""
+        return self._updated_thread
 
     def finalize_stream(self):
         """Finalize the stream by rendering any remaining partial line"""
@@ -1355,3 +1381,118 @@ class HTMLPrinter:
                 "cuddled-lists",
             ],
         )
+
+
+# Approval request handling functions
+async def handle_approval_request(approval_request: ApprovalRequest) -> bool:
+    """Handle an approval request by showing an interactive prompt to the user."""
+    import httpx
+    from rich.console import Console
+
+    console = Console()
+
+    # Display approval request information
+    console.print("\n🔐 [bold red]Bash Command Approval Required[/bold red]")
+    console.print(f"[bold]Command:[/bold] {approval_request.command}")
+    console.print(f"[bold]Working Directory:[/bold] {approval_request.working_directory}")
+
+    if approval_request.justification:
+        console.print(f"[bold]Justification:[/bold] {approval_request.justification}")
+
+    console.print("\n[dim]Options:[/dim]")
+    console.print("  [green](a)pprove[/green] - Execute this command once")
+    console.print("  [yellow](s)ession[/yellow] - Execute and auto-approve for this session")
+    console.print("  [red](d)eny[/red] - Do not execute this command")
+
+    # Get user input
+    while True:
+        try:
+            response = input("\nYour choice [a/s/d]: ").lower().strip()
+            if response in ['a', 'approve']:
+                return True
+            elif response in ['s', 'session']:
+                # For session approval, we'll mark it specially
+                approval_request.session_id = "session_approved"
+                return True
+            elif response in ['d', 'deny']:
+                return False
+            else:
+                console.print("[red]Invalid choice. Please enter 'a', 's', or 'd'.[/red]")
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[red]Approval cancelled.[/red]")
+            return False
+
+
+async def send_approval_response(approval_request: ApprovalRequest, approved: bool) -> Optional[SessionThreadModel]:
+    """Send approval response back to server and request command retry. Returns updated thread."""
+    import httpx
+    from llmvm.common.container import Container
+    from llmvm.common.objects import SessionThreadModel
+
+    try:
+        # Get LLMVM server endpoint
+        container = Container(throw=False)
+        server_host = container.get('server_host', 'localhost')
+        server_port = container.get('server_port', 8011)
+        llmvm_endpoint = f"http://{server_host}:{server_port}"
+
+        # Prepare approval response
+        approval_response = {
+            'command': approval_request.command,
+            'working_directory': approval_request.working_directory,
+            'justification': approval_request.justification,
+            'approved': approved,
+            'session_approved': approval_request.session_id == "session_approved",
+            'execution_id': getattr(approval_request, 'execution_id', '')
+        }
+
+        # Create a new request to resume execution with the approval response
+        from llmvm.common.objects import SessionThreadModel
+
+        # Create a minimal request to resume execution with the approval response
+        # We only need execution_id and approval_response fields - the server will
+        # restore the rest from the stored execution context
+        resume_request = SessionThreadModel(
+            execution_id=getattr(approval_request, 'execution_id', ''),
+            approval_response=approval_response,
+            messages=[{"role": "user", "content": [{"sequence": "resume", "content_type": "text", "url": ""}]}]  # Dummy message to pass validation
+        )
+
+        # Use the normal client streaming infrastructure
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream('POST', f'{llmvm_endpoint}/v1/tools/completions',
+                                   json=resume_request.model_dump()) as response:
+                if response.status_code == 200:
+                    # Use the same stream_response function as the main client
+                    from llmvm.client.printing import stream_response
+
+                    # Create a simple print handler that just prints tokens
+                    async def simple_print_handler(data):
+                        if hasattr(data, 'get_str'):
+                            print(data.get_str(), end='')
+                        elif hasattr(data, 'token'):
+                            print(data.token, end='')
+                        else:
+                            print(str(data), end='')
+
+                    # Use the main client's streaming logic
+                    result_objects, approval_updated_thread = await stream_response(response, simple_print_handler)
+
+                    # Return the approval updated thread if available, otherwise extract from result objects
+                    if approval_updated_thread:
+                        return approval_updated_thread
+                    elif result_objects:
+                        from llmvm.common.objects import SessionThreadModel
+                        last_obj = result_objects[-1]
+                        if isinstance(last_obj, dict):
+                            return SessionThreadModel.model_validate(last_obj)
+                        elif isinstance(last_obj, SessionThreadModel):
+                            return last_obj
+                else:
+                    print(f"❌ Failed to resume execution: {response.status_code}")
+                    return None
+
+    except Exception as e:
+        print(f"❌ Error sending approval response: {e}")
+
+    return None

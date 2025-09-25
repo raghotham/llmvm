@@ -446,6 +446,8 @@ class Content(AstNode):
             # Handle MarkdownContent's list of Content
             sequence_contents = [Content.from_json(content_data) for content_data in sequence]
             return MarkdownContent(sequence_contents, url)
+        elif content_type == 'approval_request':
+            return ApprovalRequest.from_json(data)
         else:
             raise ValueError(f"Unknown content type: {content_type}")
 
@@ -739,6 +741,71 @@ class HackerNewsResult(TextContent):
         json_result['author'] = self.author
         json_result['comment_text'] = self.comment_text
         return json_result
+
+class ApprovalRequest(TextContent):
+    """Content type for bash command approval requests.
+
+    Used when a bash command requires user approval. Instead of blocking
+    on terminal I/O, the bash helper returns this Content type which can
+    be handled by the execution controller and client.
+    """
+    def __init__(
+        self,
+        command: str,
+        working_directory: str = '',
+        justification: str = '',
+        session_id: str = '',
+    ):
+        # Create descriptive sequence text
+        sequence = f"ApprovalRequest(command='{command}', working_directory='{working_directory}', justification='{justification}')"
+        super().__init__(sequence, url='')
+
+        # Set fields AFTER parent init to ensure they're preserved
+        self.command = command
+        self.working_directory = working_directory
+        self.justification = justification
+        self.session_id = session_id
+        self.execution_id = ""  # Will be set by BCL.bash() when using approval registry
+        # Override content_type to "approval_request" for proper identification
+        self.content_type = "approval_request"
+
+    def get_str(self) -> str:
+        return f"APPROVAL_REQUEST: Command '{self.command}' in '{self.working_directory}' requires approval. Justification: {self.justification}"
+
+    def __str__(self):
+        return self.get_str()
+
+    def to_json(self) -> dict:
+        json_result = super().to_json()
+        json_result['command'] = self.command
+        json_result['working_directory'] = self.working_directory
+        json_result['justification'] = self.justification
+        json_result['session_id'] = self.session_id
+        json_result['execution_id'] = self.execution_id
+        json_result['content_type'] = 'approval_request'
+        return json_result
+
+    @classmethod
+    def from_json(cls, data: dict) -> 'ApprovalRequest':
+        # Debug: log the data structure being deserialized
+        import logging
+        logging.debug(f"ApprovalRequest.from_json received data: {data}")
+
+        # Require proper serialization - no backward compatibility hacks
+        if 'command' not in data:
+            logging.error(f"ApprovalRequest.from_json missing 'command' field in data: {data}")
+            raise ValueError(f"ApprovalRequest serialization is broken. Missing required 'command' field. Got keys: {list(data.keys())}")
+
+        approval_request = cls(
+            command=data['command'],
+            working_directory=data.get('working_directory', ''),
+            justification=data.get('justification', ''),
+            session_id=data.get('session_id', ''),
+        )
+        # Set execution_id after creation
+        approval_request.execution_id = data.get('execution_id', '')
+        return approval_request
+
 
 class Message(AstNode):
     def __init__(
@@ -2018,3 +2085,7 @@ class SessionThreadModel(BaseModel):
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     messages: list[MessageModel] = Field(default_factory=list)
     locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
+
+    # Approval flow fields
+    execution_id: str = ''
+    approval_response: dict[str, Any] = Field(default_factory=dict)

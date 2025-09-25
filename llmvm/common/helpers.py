@@ -61,6 +61,21 @@ from llmvm.common.container import Container
 
 
 def write_client_stream(obj):
+    import logging
+
+    # LOG: Debug what write_client_stream receives
+    try:
+        from llmvm.common.objects import ApprovalRequest
+        if isinstance(obj, ApprovalRequest):
+            logging.info(f"🔍 write_client_stream() APPROVAL: received ApprovalRequest")
+            logging.info(f"🔍   command='{obj.command}'")
+            logging.info(f"🔍   content_type='{obj.content_type}'")
+            logging.info(f"🔍   type={type(obj).__name__}")
+        else:
+            logging.info(f"🔍 write_client_stream() NON-APPROVAL: {type(obj).__name__}")
+    except Exception as e:
+        logging.info(f"🔍 write_client_stream() logging failed: {e}")
+
     if isinstance(obj, bytes):
         obj = StreamNode(obj, type='bytes')
 
@@ -68,14 +83,18 @@ def write_client_stream(obj):
     while frame:
         # Check if 'self' exists in the frame's local namespace
         if 'stream_handler' in frame.f_locals:
+            logging.info(f"🔍 write_client_stream() found stream_handler in frame, calling it")
             asyncio.run(frame.f_locals['stream_handler'](obj))
             return
 
         instance = frame.f_locals.get('self', None)
         if hasattr(instance, 'stream_handler'):
+            logging.info(f"🔍 write_client_stream() found stream_handler on instance, calling it")
             asyncio.run(instance.stream_handler(obj))  # type: ignore
             return
         frame = frame.f_back
+
+    logging.info(f"🔍 write_client_stream() NO STREAM HANDLER FOUND!")
 
 
 def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:

@@ -58,6 +58,7 @@ helper_functions:
   # - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.bcl.BCL.search_and_replace
   - llmvm.server.bcl.BCL.find
+  - llmvm.server.bcl.BCL.bash
   - llmvm.server.tools.browser.Browser
   - llmvm.server.tools.sheets.GoogleSheetsManager
   - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
@@ -86,3 +87,41 @@ client_role_color: 'bold bright_blue'
 client_repl_color: 'ansibrightblue'
 client_assistant_color: 'default'
 client_markdown_inline: true
+
+# bash helper configuration
+bash_helper:
+  default_approval_mode: 'on_request'  # never, on_request, on_failure, unless_trusted
+  default_sandbox_mode: 'workspace_write'  # read_only, workspace_write, danger_full_access
+  default_timeout: 10000  # milliseconds
+  session_approvals: true  # remember approvals for session
+  known_safe_commands:
+    - 'ls'
+    - 'cat'
+    - 'head'
+    - 'tail'
+    - 'grep'
+    - 'find'
+    - 'pwd'
+    - 'echo'
+    - 'which'
+    - 'whereis'
+    - 'date'
+    - 'whoami'
+    - 'id'
+    - 'uname'
+    - 'uptime'
+  dangerous_commands:
+    - 'rm'
+    - 'rmdir'
+    - 'mv'
+    - 'cp'
+    - 'dd'
+    - 'mkfs'
+    - 'fdisk'
+    - 'mount'
+    - 'umount'
+    - 'chmod'
+    - 'chown'
+    - 'su'
+    - 'sudo'
+    - 'passwd'

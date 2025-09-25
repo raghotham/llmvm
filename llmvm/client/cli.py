@@ -1506,7 +1506,7 @@ def url(
 
             async with httpx.AsyncClient(timeout=400.0) as client:
                 async with client.stream('POST', f'{llmvm_endpoint}/download', json=item.model_dump()) as response:
-                    objs = await stream_response(response, StreamPrinter().write)
+                    objs, _ = await stream_response(response, StreamPrinter().write)
             await response.aclose()
 
             session_thread = SessionThreadModel.model_validate(objs[-1])
@@ -1993,6 +1993,11 @@ def message(
 
     # Finalize the stream if inline markdown is enabled
     stream_printer.finalize_stream()
+
+    # Check if approval flow updated the thread
+    updated_thread = stream_printer.get_updated_thread()
+    if updated_thread:
+        thread = updated_thread
 
     if not thread.messages:
         rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')

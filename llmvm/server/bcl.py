@@ -18,6 +18,7 @@ from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import FunctionCallMeta, ImageContent, StreamNode, TextContent
 from llmvm.server.base_library.source import Source
+from llmvm.server.bash_helper import execute_bash_command, BashResult
 
 logging = setup_logging()
 
@@ -602,3 +603,129 @@ class BCL():
             return '\n'.join([str(r) for r in references])
         else:
             return f"No references found for method {method_name}"
+
+    @staticmethod
+    def bash(command: str,
+             timeout: Optional[int] = None,
+             approval_mode: Optional[str] = None,
+             sandbox_mode: Optional[str] = None,
+             justification: str = None):
+        """
+        Execute a bash command with approval and sandboxing.
+
+        This function provides safe bash command execution with configurable approval
+        and sandboxing mechanisms. Safe commands (ls, cat, echo, etc.) are typically
+        auto-approved, while potentially dangerous commands require explicit approval.
+
+        Args:
+            command: The bash command to execute
+            timeout: Timeout in milliseconds (uses config default if None)
+            approval_mode: "never", "on_request", "on_failure", "unless_trusted" (uses config default if None)
+            sandbox_mode: "read_only", "workspace_write", "danger_full_access" (uses config default if None)
+            justification: Reason for executing this command (helps with approval decisions)
+
+        Returns:
+            The return value should NEVER be accessed directly. Always pass it to result() immediately.
+
+        IMPORTANT: Always use this pattern:
+            result(BCL.bash("your_command", justification="why you need this"))
+
+        NEVER do this:
+            bash_result = BCL.bash("command")
+            if bash_result.exit_code == 0:  # ❌ WRONG - may fail
+                print(bash_result.stdout)
+
+        The return type is implementation-specific and may be BashResult or ApprovalRequest
+        depending on whether approval is needed. Let the result() function handle it properly.
+
+        Examples:
+            # Correct usage - always use result()
+            result(BCL.bash("ls -la", justification="List files"))
+
+            result(BCL.bash("cat config.txt",
+                           justification="Reading configuration for analysis"))
+
+            result(BCL.bash("rm temp_file.txt",
+                           approval_mode="unless_trusted",
+                           justification="Cleaning up temporary files"))
+        """
+        from llmvm.server.bash_helper import CommandSafetyAssessor, ApprovalSystem
+        from llmvm.common.container import Container
+        import sys
+
+        logging.debug(f"BCL.bash('{command}', timeout={timeout}, approval_mode={approval_mode})")
+
+        cwd = os.getcwd()
+
+        # Load configuration defaults
+        try:
+            container = Container(throw=False)
+            if hasattr(container, 'configuration'):
+                config = container.get('bash_helper', {})
+            else:
+                config = {}
+            timeout = timeout if timeout is not None else config.get('default_timeout', 10000)
+            approval_mode = approval_mode if approval_mode is not None else config.get('default_approval_mode', 'on_request')
+            sandbox_mode = sandbox_mode if sandbox_mode is not None else config.get('default_sandbox_mode', 'workspace_write')
+        except (ValueError, FileNotFoundError):
+            timeout = timeout if timeout is not None else 10000
+            approval_mode = approval_mode if approval_mode is not None else 'on_request'
+            sandbox_mode = sandbox_mode if sandbox_mode is not None else 'workspace_write'
+
+        # Check if approval is needed
+        safety_assessor = CommandSafetyAssessor()
+        approval_system = ApprovalSystem()
+
+        needs_approval = False
+        if approval_mode == "never":
+            needs_approval = False
+        elif approval_mode == "unless_trusted":
+            needs_approval = not safety_assessor.is_known_safe(command)
+        elif approval_mode == "on_request":
+            needs_approval = safety_assessor.needs_approval(command)
+        elif approval_mode == "on_failure":
+            needs_approval = False
+
+        # Check session approval cache
+        if needs_approval and approval_system.session_approvals:
+            if command in approval_system.approved_commands:
+                needs_approval = False
+                logging.debug(f"Command '{command}' already approved for session")
+
+        # If approval is needed, check if we're in interactive mode
+        if needs_approval:
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                # In server mode - return ApprovalRequest for execution controller to handle
+                logging.debug(f"Command '{command}' requires approval in server mode")
+                from llmvm.common.objects import ApprovalRequest
+
+                approval_request = ApprovalRequest(
+                    command=command,
+                    working_directory=cwd,
+                    justification=justification or "",
+                    session_id=""
+                )
+
+                # LOG: Debug ApprovalRequest creation
+                logging.info(f"🔍 BCL.bash() APPROVAL PATH: created ApprovalRequest")
+                logging.info(f"🔍   command='{approval_request.command}'")
+                logging.info(f"🔍   content_type='{approval_request.content_type}'")
+                logging.info(f"🔍   type={type(approval_request).__name__}")
+
+                # Return ApprovalRequest - execution controller will handle the approval flow
+                return approval_request
+
+        # Execute the command (either no approval needed, or we're in interactive mode)
+        result = execute_bash_command(
+            command=command,
+            timeout=timeout,
+            approval_mode=approval_mode,
+            sandbox_mode=sandbox_mode,
+            justification=justification,
+            cwd=cwd
+        )
+
+        # LOG: Debug normal execution result
+        logging.info(f"🔍 BCL.bash() EXECUTION PATH: returning {type(result).__name__}")
+
+        return result

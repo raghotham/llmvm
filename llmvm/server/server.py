@@ -736,7 +736,55 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
                     if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
                         local_helpers.append(value)
 
-                # todo: this is a hack
+                # Handle approval response resumption
+                if thread.execution_id and thread.approval_response:
+                    logging.info(f"🔍 TOOLS_COMPLETIONS: Resuming execution {thread.execution_id} with approval response")
+
+                    from llmvm.server.execution_continuation import ExecutionContinuationRegistry
+                    from llmvm.server.bash_helper import BashResult, execute_bash_command
+
+                    registry = ExecutionContinuationRegistry()
+
+                    # Extract approval response data
+                    approval_data = thread.approval_response
+                    approved = approval_data.get('approved', False)
+
+                    if approved:
+                        # Execute the approved bash command
+                        bash_result = execute_bash_command(
+                            command=approval_data['command'],
+                            approval_mode="never",  # Skip approval since already granted
+                            justification=approval_data.get('justification', ''),
+                            cwd=approval_data['working_directory']
+                        )
+
+                        # Resume execution with the bash result using current context
+                        success, result_messages = await registry.resume_execution(
+                            thread.execution_id, bash_result, controller, callback
+                        )
+
+                        if success:
+                            logging.info(f"🔍 TOOLS_COMPLETIONS: Execution resumed successfully")
+
+                            # Update thread with continuation results to preserve conversation context
+                            for msg in result_messages:
+                                thread.messages.append(MessageModel.from_message(msg))
+
+                            # The continuation system already handled streaming through our callback
+                            queue.put_nowait(QueueBreakNode())
+                            return result_messages
+                        else:
+                            logging.error(f"🔍 TOOLS_COMPLETIONS: Failed to resume execution {thread.execution_id}")
+                            # Fall through to normal execution
+                    else:
+                        logging.info(f"🔍 TOOLS_COMPLETIONS: Command was denied by user")
+                        # Command denied - could send a denial message
+                        from llmvm.common.objects import TokenNode
+                        queue.put_nowait(TokenNode("❌ Command denied by user"))
+                        queue.put_nowait(QueueBreakNode())
+                        return []
+
+                # Normal execution path
                 result, runtime_state = await controller.aexecute_continuation(
                     messages=messages,
                     temperature=thread.temperature,
@@ -782,7 +830,15 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
             return
 
         messages_result: list[Message] = task.result()
-        thread.messages = [MessageModel.from_message(m) for m in messages_result]
+
+        # For approval flows, we already updated thread.messages during continuation
+        # Only overwrite for normal execution paths
+        if not (thread.execution_id and thread.approval_response):
+            thread.messages = [MessageModel.from_message(m) for m in messages_result]
+
+        # Clear approval fields after successful completion
+        thread.execution_id = ''
+        thread.approval_response = {}
         cache_session.set(thread.id, thread)
         yield thread.model_dump()
 
@@ -1079,8 +1135,29 @@ async def chat_completions(request: Request):
         yield "data: [DONE]\n\n"
 
     async def stream_handler(ast_node: AstNode):
-        token_text = str(ast_node)
-        await queue.put(token_text)
+        # Handle ApprovalRequest specially - use jsonpickle to preserve object structure
+        from llmvm.common.objects import ApprovalRequest
+        import logging
+
+        if isinstance(ast_node, ApprovalRequest):
+            logging.info(f"🔍 SERVER stream_handler() APPROVAL: received ApprovalRequest")
+            logging.info(f"🔍   command='{ast_node.command}'")
+            logging.info(f"🔍   content_type='{ast_node.content_type}'")
+            logging.info(f"🔍   type={type(ast_node).__name__}")
+
+            import jsonpickle
+            # Serialize ApprovalRequest with jsonpickle to preserve all fields
+            token_text = jsonpickle.encode(ast_node)
+
+            logging.info(f"🔍 SERVER stream_handler() jsonpickle.encode() result: {len(token_text)} chars")
+            logging.info(f"🔍   First 200 chars: {token_text[:200]}")
+
+            await queue.put(token_text)
+            logging.info(f"🔍 SERVER stream_handler() put ApprovalRequest into queue")
+        else:
+            logging.info(f"🔍 SERVER stream_handler() NON-APPROVAL: {type(ast_node).__name__}")
+            token_text = str(ast_node)
+            await queue.put(token_text)
 
     async def event_stream():
         chunk_idx = 0
@@ -1220,6 +1297,7 @@ async def chat_completions(request: Request):
                 "total_tokens": len(' '.join(str(msg['content']) for msg in request['messages']).split()) + len(str(assistant_content).split())
             }
         }
+
 
 
 @app.exception_handler(Exception)

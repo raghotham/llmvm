@@ -9,6 +9,7 @@ from .config import Config
 from .keybindings import create_keybindings, KeyHandler
 from .renderer import Renderer
 from .server_proxy import ServerProxy
+from .slash_commands import SlashCommandHandler
 
 
 class SimpleClient:
@@ -20,6 +21,7 @@ class SimpleClient:
         self.renderer = Renderer(self.config)
         self.key_handler = KeyHandler(self)
         self.keybindings = create_keybindings(self.key_handler)
+        self.slash_handler = SlashCommandHandler(self)
 
         # Prompt session with history - only if we have a TTY
         self.session = None
@@ -62,9 +64,21 @@ class SimpleClient:
 
         while not self.should_exit:
             try:
-                # Get user input with thread ID in prompt
+                # Get user input with thread ID and token usage in prompt
                 thread_id = getattr(self.server.thread, 'id', 'new') if self.server.thread else 'new'
-                prompt = f"[{thread_id}]>> "
+
+                # Get token usage from server
+                total_tokens = 0
+                if self.server.thread and hasattr(self.server.thread, 'id') and self.server.thread.id > 0:
+                    try:
+                        total_tokens = asyncio.run(self._get_session_tokens(self.server.thread.id))
+                    except Exception:
+                        pass  # Ignore token fetching errors
+
+                if total_tokens > 0:
+                    prompt = f"[{thread_id}|{total_tokens}t]>> "
+                else:
+                    prompt = f"[{thread_id}]>> "
                 user_input = self.session.prompt(prompt)
 
                 # Handle None from Ctrl-D on empty prompt
@@ -78,8 +92,17 @@ class SimpleClient:
                     break
 
                 if user_input.strip():
-                    # Send to server and render response
-                    asyncio.run(self.handle_message(user_input))
+                    # Check for slash commands first
+                    if self.slash_handler.is_slash_command(user_input):
+                        # Handle locally, don't send to server
+                        result = asyncio.run(self.slash_handler.execute_command(user_input))
+                        if result.success:
+                            self.renderer.render_command_output(result.message)
+                        else:
+                            self.renderer.render_error(result.message)
+                    else:
+                        # Send to server and render response
+                        asyncio.run(self.handle_message(user_input))
 
             except EOFError:
                 # Shouldn't happen with our keybindings, but handle gracefully
@@ -158,6 +181,8 @@ class SimpleClient:
             if response_received:
                 self.config.log_to_file("[CLIENT] Response completed")
                 self.renderer.finish_response()
+                # Show token usage summary
+                await self._show_token_usage()
             else:
                 # No response received
                 self.config.log_to_file("[CLIENT] No response from server")
@@ -179,51 +204,35 @@ class SimpleClient:
             self.server.interrupt()
             self.renderer.show_interrupted()
 
-    def get_approval_decision(self, approval_request) -> bool:
-        """Get approval decision using simple input() like main client"""
-        from llmvm.common.objects import ApprovalRequest
-        from rich.console import Console
+    async def _get_session_tokens(self, session_id: int) -> int:
+        """Get token count for session from server"""
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.config.server_url}/v1/usage?session_id={session_id}",
+                    timeout=5.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get('total_tokens', 0)
+        except Exception as e:
+            self.config.debug_print(f"Error getting token usage from server: {e}")
+        return 0
 
-        if not isinstance(approval_request, ApprovalRequest):
-            return False
+    async def _show_token_usage(self):
+        """Display token usage information after each response"""
+        if not self.server.thread or not hasattr(self.server.thread, 'id'):
+            return
 
-        # Use Rich console for colored output like main client
-        console = Console()
-
-        # Show approval prompt with colors (exactly like main client)
-        console.print("\n🔐 [bold red]Bash Command Approval Required[/bold red]")
-        console.print(f"[bold]Command:[/bold] {approval_request.command}")
-        console.print(f"[bold]Working Directory:[/bold] {approval_request.working_directory}")
-        if approval_request.justification:
-            console.print(f"[bold]Justification:[/bold] {approval_request.justification}")
-
-        console.print("\n[dim]Options:[/dim]")
-        console.print("  [green](a)pprove[/green] - Execute this command once")
-        console.print("  [yellow](s)ession[/yellow] - Execute and auto-approve for this session")
-        console.print("  [red](d)eny[/red] - Do not execute this command")
-
-        # Get approval decision from user
-        while True:
-            try:
-                # Use simple input() like main client - no PromptSession complexity
-                response = input("\nYour choice [a/s/d]: ").lower().strip()
-
-                if response in ['a', 'approve']:
-                    console.print("[green]✓ Command approved for execution[/green]")
-                    return True
-                elif response in ['s', 'session']:
-                    console.print("[yellow]✓ Command approved for execution and session[/yellow]")
-                    # Note: Session approval would need additional server-side support
-                    return True
-                elif response in ['d', 'deny']:
-                    console.print("[red]✗ Command denied[/red]")
-                    return False
-                else:
-                    console.print("[red]Invalid choice. Please enter 'a', 's', or 'd'[/red]")
-
-            except (KeyboardInterrupt, EOFError):
-                console.print("\n[red]✗ Approval cancelled[/red]")
-                return False
+        try:
+            session_tokens = await self._get_session_tokens(self.server.thread.id)
+            if session_tokens > 0:
+                self.renderer.console.print(
+                    f"[dim]Session tokens: {session_tokens}[/dim]"
+                )
+        except Exception as e:
+            self.config.debug_print(f"Error showing token usage: {e}")
 
 
 if __name__ == "__main__":

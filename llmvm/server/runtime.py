@@ -58,8 +58,9 @@ from llmvm.common.objects import (
     coerce_to,
 )
 from llmvm.server.auto_global_dict import AutoGlobalDict
-from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.bash_helper import BashResult
+from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.token_tracker import get_token_tracker
 
 logging = setup_logging()
 
@@ -1082,6 +1083,16 @@ class Runtime:
             query=llm_instruction,
             original_query=self.original_query,
         )
+
+        # Track token usage for this LLM call
+        session_id = getattr(self.thread, 'id', -1) if hasattr(self, 'thread') and self.thread else -1
+        logging.debug(f"llm_call - assistant type: {type(assistant)}, has_total_tokens: {hasattr(assistant, 'total_tokens')}, session_id: {session_id}")
+        if hasattr(assistant, 'total_tokens'):
+            logging.debug(f"llm_call - total_tokens: {assistant.total_tokens}")
+            if assistant.total_tokens > 0:
+                get_token_tracker().track_usage(session_id, assistant.total_tokens)
+                logging.info(f"Tracked {assistant.total_tokens} tokens for session {session_id} (llm_call)")
+
         write_client_stream(TextContent(f"\nllm_call() finished...\n\n"))
         return TextContent(assistant.get_str())
 

@@ -200,6 +200,11 @@ class Renderer:
         """Render error message"""
         self.console.print(f"\n[Error: {error}]\n", style="bold red")
 
+    def render_command_output(self, message: str):
+        """Render slash command output without interfering with streaming state"""
+        # Use markdown rendering but don't interfere with the streaming state machine
+        self.console.print(Markdown(message))
+
     def finish_response(self):
         """Called when response is complete"""
         if self.in_response:

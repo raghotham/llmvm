@@ -47,6 +47,7 @@ from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.common.openai_tool_translator import OpenAIFunctionTranslator
 from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.token_tracker import get_token_tracker
 from llmvm.server.python_runtime_host import PythonRuntimeHost
 from llmvm.server.runtime import Runtime
 from llmvm.server.mcp_monitor import MCPMonitor
@@ -626,6 +627,30 @@ async def list_helpers():
         'mcp_helpers': list(mcp_helpers.keys()) if mcp_helpers else []
     }
 
+@app.get('/v1/usage')
+async def get_usage(session_id: Optional[int] = Query(None, description="Get usage for specific session")):
+    """Get token usage statistics"""
+    logging.debug('/usage')
+    tracker = get_token_tracker()
+
+    if session_id is not None:
+        session_usage = tracker.get_session_usage(session_id)
+        if session_usage:
+            return {
+                'session_id': session_id,
+                'total_tokens': session_usage.total_tokens,
+                'request_count': session_usage.request_count,
+                'start_time': session_usage.start_time,
+                'last_activity': session_usage.last_activity
+            }
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={'error': f'Session {session_id} not found'}
+            )
+    else:
+        return tracker.get_global_usage()
+
 async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncIterator[Any]:
     # Get helpers with MCP tools asynchronously
     helpers = await __get_helpers_async()
@@ -839,6 +864,26 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
         # Clear approval fields after successful completion
         thread.execution_id = ''
         thread.approval_response = {}
+        thread.messages = [MessageModel.from_message(m) for m in messages_result]
+
+        # Track token usage for main execution
+        tracker = get_token_tracker()
+        logging.debug(f"Processing {len(messages_result)} messages for token tracking, thread.id={thread.id}")
+        for i, message in enumerate(messages_result):
+            logging.debug(f"Message {i}: type={type(message)}, has_total_tokens={hasattr(message, 'total_tokens')}")
+            if hasattr(message, 'total_tokens'):
+                logging.debug(f"Message {i}: total_tokens={message.total_tokens}")
+                # Log additional debug info for Assistant messages
+                if isinstance(message, Assistant):
+                    logging.debug(f"Message {i}: Assistant - perf_trace={hasattr(message, 'perf_trace')}, underlying={hasattr(message, 'underlying')}")
+                if message.total_tokens > 0:
+                    tracker.track_usage(thread.id, message.total_tokens)
+                    logging.info(f"Tracked {message.total_tokens} tokens for session {thread.id} (main execution)")
+                else:
+                    logging.warning(f"Message {i}: Assistant has total_tokens=0 - no tokens tracked")
+            else:
+                logging.debug(f"Message {i}: no total_tokens attribute")
+
         cache_session.set(thread.id, thread)
         yield thread.model_dump()
 

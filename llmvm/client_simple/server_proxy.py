@@ -9,7 +9,7 @@ import httpx
 import jsonpickle
 
 # Import the proper data models
-from llmvm.common.objects import SessionThreadModel, MessageModel, User, TextContent, TokenNode, TokenStopNode, StreamingStopNode
+from llmvm.common.objects import SessionThreadModel, MessageModel, User, TextContent, TokenNode, TokenStopNode, StreamingStopNode, StreamNode
 
 
 @dataclass
@@ -168,8 +168,20 @@ class ServerProxy:
                 if json_str.startswith('{"py/object":'):
                     data = jsonpickle.decode(json_str)
 
+                    # Handle LLMVM StreamNode objects (for binary data like images)
+                    if isinstance(data, StreamNode):
+                        if data.type == 'bytes':
+                            # This is binary image data from BCL.generate_graph_image()
+                            return Chunk(
+                                type="image",
+                                content=data.obj,  # The raw image bytes
+                                metadata={"source": "stream_node"}
+                            )
+                        else:
+                            # Other stream node types, convert to string
+                            return Chunk(type="text", content=str(data.obj))
                     # Handle LLMVM TokenNode objects
-                    if isinstance(data, TokenNode):
+                    elif isinstance(data, TokenNode):
                         return Chunk(type="text", content=data.token)
                     elif isinstance(data, (TokenStopNode, StreamingStopNode)):
                         return None  # Stop nodes don't produce visible output

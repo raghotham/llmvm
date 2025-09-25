@@ -31,6 +31,12 @@ class BashResult:
     was_sandboxed: bool = False
     was_approved: bool = True
 
+    def get_str(self) -> str:
+        """Return stdout and stderr (if present) for use with result()."""
+        if self.stderr:
+            return f"{self.stdout}\nSTDERR:\n{self.stderr}"
+        return self.stdout
+
 
 class CommandSafetyAssessor:
     """Assesses the safety of bash commands."""

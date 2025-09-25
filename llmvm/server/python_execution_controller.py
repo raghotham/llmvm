@@ -44,6 +44,7 @@ from llmvm.common.objects import (
 )
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.auto_global_dict import AutoGlobalDict
+from llmvm.server.bash_helper import BashResult
 
 logging = setup_logging()
 
@@ -882,6 +883,8 @@ class ExecutionController(Controller):
                 ]
             elif Helpers.is_function(result):
                 return [TextContent(Helpers.get_function_description_flat(result))]
+            elif isinstance(result, BashResult):
+                return [TextContent(result.get_str())]
             else:
                 logging.error(f"Unknown content type: {type(result)}, returning shape")
                 methods = f"The result is an instance of type {type(result)} with the following methods and static methods:\n"

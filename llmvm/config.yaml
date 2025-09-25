@@ -27,18 +27,18 @@ override_max_output_tokens: None
 full_processing: true
 
 helper_functions:
-  - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
-  - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
-  - llmvm.server.tools.webhelpers.WebHelpers.get_hackernews_latest
-  - llmvm.server.tools.edgar.EdgarHelpers.get_filings
-  - llmvm.server.tools.edgar.EdgarHelpers.get_form_filing_or_item_url_as_markdown
-  - llmvm.server.tools.edgar.EdgarHelpers.get_latest_filing_as_markdown
-  - llmvm.server.tools.market.MarketHelpers.get_stock_price
-  - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
-  - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
-  - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
-  - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
-  - llmvm.server.tools.market.MarketHelpers.get_options_chain
+  # - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
+  # - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
+  # - llmvm.server.tools.webhelpers.WebHelpers.get_hackernews_latest
+  # - llmvm.server.tools.edgar.EdgarHelpers.get_filings
+  # - llmvm.server.tools.edgar.EdgarHelpers.get_form_filing_or_item_url_as_markdown
+  # - llmvm.server.tools.edgar.EdgarHelpers.get_latest_filing_as_markdown
+  # - llmvm.server.tools.market.MarketHelpers.get_stock_price
+  # - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
+  # - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
+  # - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
+  # - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
+  # - llmvm.server.tools.market.MarketHelpers.get_options_chain
   - llmvm.server.bcl.BCL.datetime
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial
@@ -51,21 +51,21 @@ helper_functions:
   - llmvm.server.bcl.BCL.find_all_references_to_method
   - llmvm.server.bcl.BCL.get_weather
   - llmvm.server.bcl.BCL.address_lat_lon
-  - llmvm.server.bcl.BCL.get_currency_rates
-  - llmvm.server.bcl.BCL.get_gold_silver_price_in_usd
-  - llmvm.server.bcl.BCL.get_bitcoin_prices_in_usd
-  - llmvm.server.bcl.BCL.get_central_bank_rates
-  - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
+  # - llmvm.server.bcl.BCL.get_currency_rates
+  # - llmvm.server.bcl.BCL.get_gold_silver_price_in_usd
+  # - llmvm.server.bcl.BCL.get_bitcoin_prices_in_usd
+  # - llmvm.server.bcl.BCL.get_central_bank_rates
+  # - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.bcl.BCL.search_and_replace
   - llmvm.server.bcl.BCL.find
   - llmvm.server.tools.browser.Browser
   - llmvm.server.tools.sheets.GoogleSheetsManager
   - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
   - llmvm.server.tools.search_tool.Search.google_search
-  - llmvm.server.tools.search_tool.Search.google_patent_search
-  - llmvm.server.tools.search_tool.Search.bluesky_search
-  - llmvm.server.tools.search_tool.Search.yelp_search
-  - llmvm.server.tools.search_tool.Search.hackernews_search
+  # - llmvm.server.tools.search_tool.Search.google_patent_search
+  # - llmvm.server.tools.search_tool.Search.bluesky_search
+  # - llmvm.server.tools.search_tool.Search.yelp_search
+  # - llmvm.server.tools.search_tool.Search.hackernews_search
   - llmvm.server.tools.database.DatabaseHelpers.connect_database
   - llmvm.server.tools.database.DatabaseHelpers.query_database
   - llmvm.server.tools.database.DatabaseHelpers.get_database_schema

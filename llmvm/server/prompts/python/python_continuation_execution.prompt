@@ -16,7 +16,7 @@ Our workflow looks like this:
 * I will execute those code blocks inside a Python runtime for you.
 * Any print() or result() calls in those code blocks will be captured and returned in <helpers_result></helpers_result> XML tags which I will send to you in a subsequent message. You can assume that data and values you see in <helpers_result></helpers_result> is up to date and has just been executed.
 * You can either continue to solve the sub-tasks, or choose to finish if you think you have solved the original query, question or problem by emitting the </complete> tag.
-* If you continue to solve the sub-tasks, any variables or methods declared or created in previous <helpers></helpers> blocks will be in scope to be called or referenced for any new code you generate in a subsequent <helpers></helpers> blocks. You do not need to redeclare variables or methods that are already in scope, or re-instantiate objects that have already been instantiated.
+* <BEGIN IMPORTANT>DO NOT FORGET THIS EVER. If you continue to solve the sub-tasks, any variables or methods declared or created in previous <helpers></helpers> blocks will be in scope to be called or referenced for any new code you generate in a subsequent <helpers></helpers> blocks. You do not need to redeclare variables or methods that are already in scope, or re-instantiate objects that have already been instantiated.</END IMPORTANT>
 * You have a limited context window, so you have access to a read/write memory store using the special helpers below. You are encouraged to write completed sub-tasks to memory and then retrieve them later so that you can free up your context window for other tasks.
 
 ## Helpers

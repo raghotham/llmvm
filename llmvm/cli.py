@@ -15,28 +15,36 @@ import requests
 from pathlib import Path
 from typing import Optional
 
+
 # Colors for terminal output
 class Colors:
-    RED = '\033[0;31m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    BLUE = '\033[0;34m'
-    NC = '\033[0m'  # No Color
+    RED = "\033[0;31m"
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[1;33m"
+    BLUE = "\033[0;34m"
+    NC = "\033[0m"  # No Color
+
 
 def log_info(message: str) -> None:
     print(f"{Colors.BLUE}[INFO]{Colors.NC} {message}")
 
+
 def log_success(message: str) -> None:
     print(f"{Colors.GREEN}[SUCCESS]{Colors.NC} {message}")
+
 
 def log_warning(message: str) -> None:
     print(f"{Colors.YELLOW}[WARNING]{Colors.NC} {message}")
 
+
 def log_error(message: str) -> None:
     print(f"{Colors.RED}[ERROR]{Colors.NC} {message}")
 
+
 class LLMVMManager:
-    def __init__(self, port: int = 8011, log_level: str = "INFO", logs_dir: Optional[Path] = None):
+    def __init__(
+        self, port: int = 8011, log_level: str = "INFO", logs_dir: Optional[Path] = None
+    ):
         self.port = port
         self.log_level = log_level
         self.server_process: Optional[subprocess.Popen] = None
@@ -70,7 +78,7 @@ class LLMVMManager:
         """Check if server is already running"""
         if self.pid_file.exists():
             try:
-                with open(self.pid_file, 'r') as f:
+                with open(self.pid_file, "r") as f:
                     pid = int(f.read().strip())
                 # Check if process is still running
                 os.kill(pid, 0)
@@ -89,7 +97,9 @@ class LLMVMManager:
         while time.time() - start_time < timeout:
             try:
                 # Try to connect to the health endpoint
-                response = requests.get(f"http://localhost:{self.port}/health", timeout=2)
+                response = requests.get(
+                    f"http://localhost:{self.port}/health", timeout=2
+                )
                 if response.status_code == 200:
                     try:
                         health_data = response.json()
@@ -109,7 +119,9 @@ class LLMVMManager:
 
                         # If we've been waiting for a while and still have missing helpers, fail
                         elapsed = time.time() - start_time
-                        if missing_helpers and elapsed > 10:  # Give 10 seconds for helpers to load
+                        if (
+                            missing_helpers and elapsed > 10
+                        ):  # Give 10 seconds for helpers to load
                             log_error("Server startup failed due to missing helpers:")
                             for helper in missing_helpers:
                                 log_error(f"  - {helper}")
@@ -120,7 +132,9 @@ class LLMVMManager:
                         if missing_helpers:
                             log_info(f"Server starting up... ({reason})")
                             if len(missing_helpers) <= 3:
-                                log_info(f"Missing helpers: {', '.join(missing_helpers)}")
+                                log_info(
+                                    f"Missing helpers: {', '.join(missing_helpers)}"
+                                )
                         else:
                             log_info(f"Server starting up... ({reason})")
                     except:
@@ -133,7 +147,9 @@ class LLMVMManager:
             time.sleep(0.5)  # Check every 500ms
 
         log_error(f"Server did not become ready within {timeout} seconds")
-        log_error("Server startup failed. Here are the last few lines from the server log:")
+        log_error(
+            "Server startup failed. Here are the last few lines from the server log:"
+        )
         print()
         self._show_recent_logs(lines=15)
         print()
@@ -154,22 +170,26 @@ class LLMVMManager:
         # Start server process
         try:
             # Open log file using absolute path
-            log_f = open(self.log_file, 'w')
+            log_f = open(self.log_file, "w")
 
             server_process = subprocess.Popen(
                 [
-                    sys.executable, "-m", "llmvm.server.server",
-                    "--port", str(self.port),
-                    "--log-level", self.log_level
+                    sys.executable,
+                    "-m",
+                    "llmvm.server.server",
+                    "--port",
+                    str(self.port),
+                    "--log-level",
+                    self.log_level,
                 ],
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 cwd=str(self.project_root),  # Ensure it's a string
-                start_new_session=True
+                start_new_session=True,
             )
 
             # Write PID file
-            with open(self.pid_file, 'w') as pid_f:
+            with open(self.pid_file, "w") as pid_f:
                 pid_f.write(str(server_process.pid))
 
             # Wait a moment and check if server started successfully
@@ -199,7 +219,7 @@ class LLMVMManager:
             return
 
         try:
-            with open(self.pid_file, 'r') as f:
+            with open(self.pid_file, "r") as f:
                 pid = int(f.read().strip())
 
             log_info(f"Stopping LLMVM server (PID: {pid})...")
@@ -232,7 +252,7 @@ class LLMVMManager:
     def show_status(self) -> None:
         """Show server status"""
         if self.is_server_running():
-            with open(self.pid_file, 'r') as f:
+            with open(self.pid_file, "r") as f:
                 pid = int(f.read().strip())
             log_success(f"Server is running (PID: {pid}) on port {self.port}")
         else:
@@ -242,7 +262,7 @@ class LLMVMManager:
         """Show recent log entries"""
         if self.log_file.exists():
             try:
-                with open(self.log_file, 'r') as f:
+                with open(self.log_file, "r") as f:
                     all_lines = f.readlines()
                     recent_lines = all_lines[-lines:]
                     print("=== Recent Server Logs ===")
@@ -257,7 +277,7 @@ class LLMVMManager:
         """Show server logs"""
         if self.log_file.exists():
             try:
-                with open(self.log_file, 'r') as f:
+                with open(self.log_file, "r") as f:
                     all_lines = f.readlines()
                     recent_lines = all_lines[-lines:]
                     print("=== LLMVM Server Logs ===")
@@ -273,10 +293,39 @@ class LLMVMManager:
         log_info("Starting LLMVM client...")
 
         try:
-            # Run client as subprocess to preserve CLI wrapper for cleanup
-            cmd = [sys.executable, "-m", "llmvm.client.cli"] + client_args
-            # Inherit stdin/stdout/stderr to preserve terminal behavior
-            subprocess.run(cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+            # Default to simple client, unless explicitly set to advanced
+            client_type = os.environ.get("LLMVM_CLIENT", "simple").lower()
+
+            # Set up environment for client
+            original_endpoint = os.environ.get("LLMVM_ENDPOINT")
+            os.environ["LLMVM_ENDPOINT"] = f"http://localhost:{self.port}"
+
+            if client_type == "advanced":
+                # Use current advanced client as subprocess (opt-in)
+                log_info("Using advanced client")
+                env = os.environ.copy()
+                cmd = [sys.executable, "-m", "llmvm.client.cli"] + client_args
+                subprocess.run(
+                    cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, env=env
+                )
+            else:
+                # Use simple client directly (default)
+                log_info("Using simple client")
+                from llmvm.client_simple.client import SimpleClient
+
+                # Create and run simple client directly
+                client = SimpleClient()
+                exit_code = client.run()
+
+                # Handle exit code if needed
+                if exit_code != 0:
+                    log_warning(f"Client exited with code {exit_code}")
+
+            # Restore original environment
+            if original_endpoint is None:
+                os.environ.pop("LLMVM_ENDPOINT", None)
+            else:
+                os.environ["LLMVM_ENDPOINT"] = original_endpoint
 
         except KeyboardInterrupt:
             log_info("Client interrupted by user")
@@ -290,12 +339,12 @@ class LLMVMManager:
     def check_api_keys(self) -> bool:
         """Check if at least one API key is set"""
         api_keys = [
-            'OPENAI_API_KEY',
-            'ANTHROPIC_API_KEY',
-            'GEMINI_API_KEY',
-            'BEDROCK_API_KEY',
-            'DEEPSEEK_API_KEY',
-            'LLAMA_API_KEY'
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "BEDROCK_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "LLAMA_API_KEY",
         ]
 
         for key in api_keys:
@@ -323,6 +372,7 @@ class LLMVMManager:
             # Clean up PID file
             self.pid_file.unlink(missing_ok=True)
 
+
 def main():
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(
@@ -338,47 +388,36 @@ Environment variables:
   LLMVM_SERVER_PORT       Override default server port (default: 8011)
   LLMVM_LOG_LEVEL         Override default log level (default: INFO)
   LLMVM_LOGS_DIR          Override default logs directory (default: ./logs)
-        """
+        """,
     )
 
     parser.add_argument(
-        "-p", "--port",
+        "-p",
+        "--port",
         type=int,
         default=int(os.getenv("LLMVM_SERVER_PORT", "8011")),
-        help="Server port (default: 8011)"
+        help="Server port (default: 8011)",
     )
 
     parser.add_argument(
-        "-l", "--log-level",
+        "-l",
+        "--log-level",
         default=os.getenv("LLMVM_LOG_LEVEL", "INFO"),
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Log level (default: INFO)"
+        help="Log level (default: INFO)",
     )
 
     parser.add_argument(
         "--logs-dir",
         default=os.getenv("LLMVM_LOGS_DIR"),
-        help="Directory for log files (default: ./logs)"
+        help="Directory for log files (default: ./logs)",
     )
 
+    parser.add_argument("--status", action="store_true", help="Show server status")
 
-    parser.add_argument(
-        "--status",
-        action="store_true",
-        help="Show server status"
-    )
+    parser.add_argument("--logs", action="store_true", help="Show server logs")
 
-    parser.add_argument(
-        "--logs",
-        action="store_true",
-        help="Show server logs"
-    )
-
-    parser.add_argument(
-        "--stop",
-        action="store_true",
-        help="Stop the server"
-    )
+    parser.add_argument("--stop", action="store_true", help="Stop the server")
 
     # Parse known args to allow passing remaining args to client
     args, client_args = parser.parse_known_args()
@@ -427,6 +466,7 @@ Environment variables:
     # Start client (this will block until client exits)
     # When client exits, cleanup will automatically stop the server
     manager.start_client(client_args)
+
 
 if __name__ == "__main__":
     main()

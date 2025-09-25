@@ -132,6 +132,23 @@ class SimpleClient:
                 elif chunk.type == "error":
                     self.renderer.render_error(chunk.content)
                     break  # Stop processing on error
+                elif chunk.type == "approval":
+                    # Handle approval request directly in the streaming loop (like main client)
+                    approved = self.get_approval_decision(chunk.content)
+                    # Send approval response and continue streaming
+                    async for response_chunk in self.server.send_approval_response(chunk.content, approved):
+                        if response_chunk.type == "text":
+                            self.renderer.render_text(response_chunk.content)
+                        elif response_chunk.type == "image":
+                            self.renderer.render_image(response_chunk.content)
+                        elif response_chunk.type == "code":
+                            language = response_chunk.metadata.get("language") if response_chunk.metadata else None
+                            self.renderer.render_code(response_chunk.content, language)
+                        elif response_chunk.type == "error":
+                            self.renderer.render_error(response_chunk.content)
+                            break
+                        else:
+                            self.renderer.render_text(str(response_chunk.content))
                 else:
                     # Unknown type, render as text
                     self.config.debug_print(f"Unknown chunk type: {chunk.type}")
@@ -161,6 +178,52 @@ class SimpleClient:
         if self.server.is_streaming:
             self.server.interrupt()
             self.renderer.show_interrupted()
+
+    def get_approval_decision(self, approval_request) -> bool:
+        """Get approval decision using simple input() like main client"""
+        from llmvm.common.objects import ApprovalRequest
+        from rich.console import Console
+
+        if not isinstance(approval_request, ApprovalRequest):
+            return False
+
+        # Use Rich console for colored output like main client
+        console = Console()
+
+        # Show approval prompt with colors (exactly like main client)
+        console.print("\n🔐 [bold red]Bash Command Approval Required[/bold red]")
+        console.print(f"[bold]Command:[/bold] {approval_request.command}")
+        console.print(f"[bold]Working Directory:[/bold] {approval_request.working_directory}")
+        if approval_request.justification:
+            console.print(f"[bold]Justification:[/bold] {approval_request.justification}")
+
+        console.print("\n[dim]Options:[/dim]")
+        console.print("  [green](a)pprove[/green] - Execute this command once")
+        console.print("  [yellow](s)ession[/yellow] - Execute and auto-approve for this session")
+        console.print("  [red](d)eny[/red] - Do not execute this command")
+
+        # Get approval decision from user
+        while True:
+            try:
+                # Use simple input() like main client - no PromptSession complexity
+                response = input("\nYour choice [a/s/d]: ").lower().strip()
+
+                if response in ['a', 'approve']:
+                    console.print("[green]✓ Command approved for execution[/green]")
+                    return True
+                elif response in ['s', 'session']:
+                    console.print("[yellow]✓ Command approved for execution and session[/yellow]")
+                    # Note: Session approval would need additional server-side support
+                    return True
+                elif response in ['d', 'deny']:
+                    console.print("[red]✗ Command denied[/red]")
+                    return False
+                else:
+                    console.print("[red]Invalid choice. Please enter 'a', 's', or 'd'[/red]")
+
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[red]✗ Approval cancelled[/red]")
+                return False
 
 
 if __name__ == "__main__":

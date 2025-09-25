@@ -9,13 +9,13 @@ import httpx
 import jsonpickle
 
 # Import the proper data models
-from llmvm.common.objects import SessionThreadModel, MessageModel, User, TextContent, TokenNode, TokenStopNode, StreamingStopNode, StreamNode
+from llmvm.common.objects import SessionThreadModel, MessageModel, User, TextContent, TokenNode, TokenStopNode, StreamingStopNode, StreamNode, ApprovalRequest
 
 
 @dataclass
 class Chunk:
     """Represents a chunk of data from the server"""
-    type: str  # "text", "image", "code", "error"
+    type: str  # "text", "image", "code", "error", "approval"
     content: any
     metadata: Optional[dict] = None
 
@@ -144,6 +144,65 @@ class ServerProxy:
         """Reset the conversation history"""
         self.thread = None
 
+    async def send_approval_response(self, approval_request: ApprovalRequest, approved: bool) -> AsyncIterator[Chunk]:
+        """Send approval response back to server and resume execution"""
+        if not self.thread:
+            yield Chunk(type="error", content="No active thread for approval response")
+            return
+
+        try:
+            # Update thread with approval response
+            self.thread.execution_id = approval_request.execution_id
+            self.thread.approval_response = {
+                "approved": approved,
+                "command": approval_request.command,
+                "working_directory": approval_request.working_directory,
+                "justification": approval_request.justification
+            }
+
+            # Configure timeout
+            timeout_config = httpx.Timeout(
+                timeout=self.config.server_timeout,
+                connect=10.0
+            ) if self.config.server_timeout else httpx.Timeout(None)
+
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                # Convert to dict for JSON serialization
+                payload = self.thread.model_dump()
+
+                self.config.log_to_file(f"[SERVER_PROXY] Sending approval response: approved={approved}")
+                self.config.debug_print(f"Sending approval response to {self.server_url}/v1/tools/completions")
+
+                # Send request to server
+                request = client.stream(
+                    "POST",
+                    f"{self.server_url}/v1/tools/completions",
+                    json=payload,
+                    headers={"Accept": "text/event-stream"}
+                )
+
+                async with request as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        error_msg = f"Server error ({response.status_code}): {error_text.decode()}"
+                        self.config.log_to_file(f"[SERVER_PROXY] {error_msg}")
+                        yield Chunk(type="error", content=error_msg)
+                        return
+
+                    # Stream response lines
+                    async for line in response.aiter_lines():
+                        chunk = self._parse_sse_line(line)
+                        if chunk:
+                            yield chunk
+
+        except Exception as e:
+            yield Chunk(type="error", content=f"Approval response failed: {e}")
+        finally:
+            # Clear approval fields after completion
+            if self.thread:
+                self.thread.execution_id = ""
+                self.thread.approval_response = {}
+
     def _parse_sse_line(self, line: str) -> Optional[Chunk]:
         """Parse Server-Sent Events line into Chunk"""
         if not line:
@@ -180,6 +239,18 @@ class ServerProxy:
                         else:
                             # Other stream node types, convert to string
                             return Chunk(type="text", content=str(data.obj))
+                    # Handle LLMVM ApprovalRequest objects
+                    elif isinstance(data, ApprovalRequest):
+                        return Chunk(
+                            type="approval",
+                            content=data,
+                            metadata={
+                                "command": data.command,
+                                "working_directory": data.working_directory,
+                                "justification": data.justification,
+                                "execution_id": data.execution_id
+                            }
+                        )
                     # Handle LLMVM TokenNode objects
                     elif isinstance(data, TokenNode):
                         return Chunk(type="text", content=data.token)

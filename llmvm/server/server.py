@@ -876,6 +876,7 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
                 # Log additional debug info for Assistant messages
                 if isinstance(message, Assistant):
                     logging.debug(f"Message {i}: Assistant - perf_trace={hasattr(message, 'perf_trace')}, underlying={hasattr(message, 'underlying')}")
+                    logging.debug(f"Message {i}: Assistant.total_tokens = {message.total_tokens} (type: {type(message.total_tokens)})")
                 if message.total_tokens > 0:
                     tracker.track_usage(thread.id, message.total_tokens)
                     logging.info(f"Tracked {message.total_tokens} tokens for session {thread.id} (main execution)")
@@ -1369,7 +1370,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == '__main__':
-    default_controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
+    default_controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR')
     default_model_str = f'{default_controller}_model'
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
     role_color = Container().get_config_variable('client_info_bold_color', default='bright_blue')

@@ -1,0 +1,184 @@
+# Default configuration for LLMVM
+# This file contains ALL default values used in the codebase
+# User config files will override these defaults
+
+# =============================================================================
+# SERVER CONFIGURATION
+# =============================================================================
+server_host: '0.0.0.0'
+server_port: 8011
+LLMVM_ENDPOINT: 'http://127.0.0.1:8011'
+
+# =============================================================================
+# EXECUTION CONFIGURATION
+# =============================================================================
+
+# Main executor settings
+executor: 'response'  # Default executor: response, anthropic, openai, gemini, deepseek, bedrock
+LLMVM_EXECUTOR: ''    # Can be overridden by environment variable
+LLMVM_MODEL: ''       # Model is auto-selected based on executor if not specified
+
+# Processing modes
+LLMVM_FULL_PROCESSING: false
+LLMVM_THINKING: 0
+full_processing: true
+
+# Token limits (null means use executor defaults)
+override_max_input_tokens: null
+override_max_output_tokens: null
+
+# Generic executor configuration
+LLMVM_EXECUTOR_API_BASE: ''
+LLMVM_EXECUTOR_API_KEY: ''
+
+# =============================================================================
+# EXECUTOR-SPECIFIC SETTINGS
+# =============================================================================
+
+# OpenAI executor
+openai_api_base: 'https://api.openai.com/v1'
+default_openai_model: 'gpt-5'
+
+# Anthropic executor
+anthropic_api_base: 'https://api.anthropic.com'
+default_anthropic_model: 'claude-sonnet-4-20250514'
+
+# Gemini executor
+gemini_api_base: 'https://generativelanguage.googleapis.com/v1beta'
+default_gemini_model: 'gemini-2.5-pro'
+
+# DeepSeek executor
+deepseek_api_base: 'https://api.deepseek.com/v1'
+default_deepseek_model: 'deepseek-chat'
+
+# Bedrock executor
+bedrock_api_base: 'us-east-1'
+default_bedrock_model: 'amazon.nova-pro-v1:0'
+
+# =============================================================================
+# CLIENT DISPLAY SETTINGS
+# =============================================================================
+
+# Colors for Rich renderer (llmvm.client)
+client_stream_token_color: 'dim'
+client_stream_thinking_token_color: 'gray'
+client_role_color: 'bold bright_blue'
+client_repl_color: 'ansibrightblue'
+client_assistant_color: 'default'
+client_markdown_inline: true
+client_info_bold_color: 'bright_blue'
+client_info_color: 'bold green'
+
+# =============================================================================
+# STORAGE & FILES
+# =============================================================================
+
+# Core directories
+cache_directory: '~/.local/share/llmvm/cache'
+log_directory: '~/.local/share/llmvm/logs'
+memory_directory: '~/.local/share/llmvm/memory'
+LLMVM_MEMORY_DIRECTORY: '~/.local/share/llmvm/memory'
+
+# Specific files
+todo_file: '~/.local/share/llmvm/todo.md'
+LLMVM_TODO_FILE: '~/.local/share/llmvm/todo.md'
+chromium_cookies: '~/.local/share/llmvm/cookies.txt'
+LLMVM_COOKIES: ''
+
+# =============================================================================
+# DEBUG & TRACING
+# =============================================================================
+
+# Profiling
+LLMVM_PROFILING: false
+profiling: false
+profiling_file: '~/.local/share/llmvm/profiling_trace.log'
+
+# Execution tracing
+executor_trace: '~/.local/share/llmvm/executor.trace'
+LLMVM_EXECUTOR_TRACE: ''
+
+# Other debug settings
+LLMVM_SERIALIZE: ''
+LLMVM_SHARE: ''
+
+# =============================================================================
+# BROWSER SETTINGS
+# =============================================================================
+chromium_headless: true
+
+# =============================================================================
+# BASH HELPER CONFIGURATION
+# =============================================================================
+bash_helper:
+  default_approval_mode: 'on_request'  # never, on_request, on_failure, unless_trusted
+  default_sandbox_mode: 'workspace_write'  # read_only, workspace_write, danger_full_access
+  default_timeout: 10000  # milliseconds
+  session_approvals: true  # remember approvals for session
+  known_safe_commands:
+    - 'ls'
+    - 'cat'
+    - 'head'
+    - 'tail'
+    - 'echo'
+    - 'pwd'
+    - 'date'
+    - 'whoami'
+
+# =============================================================================
+# MCP (Model Context Protocol) SETTINGS
+# =============================================================================
+mcp_server_patterns: null
+mcp_exclude_patterns: null
+
+# =============================================================================
+# EXTERNAL API KEYS
+# =============================================================================
+SEC_API_KEY: null  # For Edgar SEC filings
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+helper_functions:
+  # Core BCL (Base Class Library) functions
+  - llmvm.server.bcl.BCL.datetime
+  - llmvm.server.bcl.BCL.sample_normal
+  - llmvm.server.bcl.BCL.sample_binomial
+  - llmvm.server.bcl.BCL.sample_lognormal
+  - llmvm.server.bcl.BCL.sample_list
+  - llmvm.server.bcl.BCL.generate_graph_image
+  - llmvm.server.bcl.BCL.matplotlib_to_image
+  - llmvm.server.bcl.BCL.get_source_code_structure_summary
+  - llmvm.server.bcl.BCL.get_source_code
+  - llmvm.server.bcl.BCL.find_all_references_to_method
+  - llmvm.server.bcl.BCL.get_weather
+  - llmvm.server.bcl.BCL.address_lat_lon
+  - llmvm.server.bcl.BCL.search_and_replace
+  - llmvm.server.bcl.BCL.find
+  - llmvm.server.bcl.BCL.bash
+
+  # Browser tools
+  - llmvm.server.tools.browser.Browser
+  - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
+
+  # Google integrations
+  - llmvm.server.tools.sheets.GoogleSheetsManager
+
+  # Search tools
+  - llmvm.server.tools.search_tool.Search.google_search
+
+  # Database tools
+  - llmvm.server.tools.database.DatabaseHelpers.connect_database
+  - llmvm.server.tools.database.DatabaseHelpers.query_database
+  - llmvm.server.tools.database.DatabaseHelpers.get_database_schema
+  - llmvm.server.tools.database.DatabaseHelpers.get_business_context
+  - llmvm.server.tools.database.DatabaseHelpers.suggest_analysis_queries
+  - llmvm.server.tools.database.DatabaseHelpers.add_insight
+  - llmvm.server.tools.database.DatabaseHelpers.clear_cache
+
+  # Semantic database tools
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.create_semantic_understanding
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.get_semantic_context
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.generate_verification_queries
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.get_semantic_suggestions
+  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.clear_semantic_cache

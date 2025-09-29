@@ -1196,7 +1196,7 @@ class Runtime:
         logging.debug(f"PythonRuntime.result({Helpers.str_get_str(expr)[:20]})")
 
         # if we have a list of answers, maybe just return them.
-        if m_isinstance(expr, list) and all([m_isinstance(e, Assistant) for e in expr]):
+        if m_isinstance(expr, list) and len(expr) > 0 and all([m_isinstance(e, Assistant) for e in expr]):
             # collapse the assistant answers and continue
             expr = cast(list[Assistant], expr)
             last = expr[-1]
@@ -1212,20 +1212,6 @@ class Runtime:
             self.answers.append(answer)
             return __result(expr)
 
-        # Handle ApprovalRequest specially - stream it directly to client for approval handling
-        from llmvm.common.objects import ApprovalRequest
-        if isinstance(expr, ApprovalRequest):
-            logging.info(f"🔍 runtime.result() APPROVAL DETECTION: found ApprovalRequest")
-            logging.info(f"🔍   command='{expr.command}'")
-            logging.info(f"🔍   content_type='{expr.content_type}'")
-            logging.info(f"🔍   type={type(expr).__name__}")
-            logging.info(f"🔍 runtime.result() calling write_client_stream() with ApprovalRequest")
-
-            write_client_stream(expr)
-
-            logging.info(f"🔍 runtime.result() returned from write_client_stream(), returning ApprovalRequest unchanged")
-            # Don't create Answer yet - wait for approval response
-            return expr
 
         snippet = Helpers.str_get_str(expr).replace("\n", " ")[:150]
 

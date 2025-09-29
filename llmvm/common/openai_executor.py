@@ -452,6 +452,7 @@ class OpenAIExecutor(Executor):
 
             params = {k: v for k, v in base_params.items() if v is not None}
             response = await self.aclient.chat.completions.create(**params)
+
             return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
@@ -484,13 +485,23 @@ class OpenAIExecutor(Executor):
         text_response: str = ""
         thinking_response: str = ""
         perf = None
+        final_usage = None
+        final_token = None
 
         async with await stream as stream_async:  # type: ignore
             async for token in stream_async:  # type: ignore
+                final_token = token  # Keep track of the final token
+
+                # Capture usage information from the final token
+                if hasattr(token, 'underlying') and hasattr(token.underlying, 'usage') and token.underlying.usage:
+                    final_usage = token.underlying.usage
+
                 if token.thinking:
+                    logging.debug(f"openai_executor: thinking chunk: '{token.token}'")
                     await stream_handler(TokenThinkingNode(token.token))
                     thinking_response += token.token
                 else:
+                    logging.debug(f"openai_executor: text chunk: '{token.token}'")
                     await stream_handler(TokenNode(token.token))
                     text_response += token.token
 
@@ -509,6 +520,47 @@ class OpenAIExecutor(Executor):
         _ = await stream_async.get_final_message()
         perf.log()
 
+        # Debug: log only the final token structure with full nested details
+        if final_token:
+            import pprint
+            logging.debug(f"openai_executor: FINAL token.token='{final_token.token}'")
+            logging.debug(f"openai_executor: FINAL token.underlying type={type(final_token.underlying)}")
+            logging.debug("openai_executor: FINAL token.underlying full structure:")
+            logging.debug(pprint.pformat(final_token.underlying.__dict__, width=200))
+
+            # Also check all attributes
+            all_attrs = [attr for attr in dir(final_token.underlying) if not attr.startswith('_')]
+            logging.debug(f"openai_executor: FINAL token.underlying attributes: {all_attrs}")
+
+            # Print each attribute value
+            for attr in all_attrs:
+                try:
+                    value = getattr(final_token.underlying, attr)
+                    if not callable(value):
+                        logging.debug(f"openai_executor: FINAL token.underlying.{attr} = {value}")
+                except Exception as e:
+                    logging.debug(f"openai_executor: FINAL token.underlying.{attr} = ERROR: {e}")
+
+        # Calculate total tokens, including GPT-5 reasoning tokens if present
+        actual_total_tokens = perf.total_tokens
+        logging.debug(f"openai_executor: perf.total_tokens={perf.total_tokens}, final_usage={final_usage is not None}")
+
+        if final_usage:
+            logging.debug(f"openai_executor: final_usage attributes: {[attr for attr in dir(final_usage) if not attr.startswith('_')]}")
+            if hasattr(final_usage, 'reasoning_tokens') and final_usage.reasoning_tokens:
+                # GPT-5: total = prompt_tokens + completion_tokens + reasoning_tokens
+                actual_total_tokens = (final_usage.prompt_tokens or 0) + (final_usage.completion_tokens or 0) + (final_usage.reasoning_tokens or 0)
+                logging.debug(f"openai_executor: GPT-5 usage - prompt={final_usage.prompt_tokens}, completion={final_usage.completion_tokens}, reasoning={final_usage.reasoning_tokens}, total={actual_total_tokens}")
+            elif hasattr(final_usage, 'total_tokens') and final_usage.total_tokens:
+                actual_total_tokens = final_usage.total_tokens
+                logging.debug(f"openai_executor: Regular usage - total={actual_total_tokens}")
+            else:
+                logging.debug(f"openai_executor: final_usage has no usable token info")
+        else:
+            logging.debug(f"openai_executor: no final_usage captured, using perf.total_tokens={perf.total_tokens}")
+
+        logging.debug(f"openai_executor: creating Assistant with total_tokens={actual_total_tokens}")
+
         assistant = Assistant(
             message=TextContent(text_response.strip()),
             thinking=TextContent(thinking_response.strip()),
@@ -516,7 +568,7 @@ class OpenAIExecutor(Executor):
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
             perf_trace=perf,
-            total_tokens=perf.total_tokens,
+            total_tokens=actual_total_tokens,
         )
         if assistant.get_str() == "":
             logging.warning(

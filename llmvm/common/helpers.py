@@ -63,18 +63,7 @@ from llmvm.common.container import Container
 def write_client_stream(obj):
     import logging
 
-    # LOG: Debug what write_client_stream receives
-    try:
-        from llmvm.common.objects import ApprovalRequest
-        if isinstance(obj, ApprovalRequest):
-            logging.info(f"🔍 write_client_stream() APPROVAL: received ApprovalRequest")
-            logging.info(f"🔍   command='{obj.command}'")
-            logging.info(f"🔍   content_type='{obj.content_type}'")
-            logging.info(f"🔍   type={type(obj).__name__}")
-        else:
-            logging.info(f"🔍 write_client_stream() NON-APPROVAL: {type(obj).__name__}")
-    except Exception as e:
-        logging.info(f"🔍 write_client_stream() logging failed: {e}")
+    # Convert bytes to StreamNode if needed
 
     if isinstance(obj, bytes):
         obj = StreamNode(obj, type='bytes')
@@ -83,18 +72,16 @@ def write_client_stream(obj):
     while frame:
         # Check if 'self' exists in the frame's local namespace
         if 'stream_handler' in frame.f_locals:
-            logging.info(f"🔍 write_client_stream() found stream_handler in frame, calling it")
             asyncio.run(frame.f_locals['stream_handler'](obj))
             return
 
         instance = frame.f_locals.get('self', None)
         if hasattr(instance, 'stream_handler'):
-            logging.info(f"🔍 write_client_stream() found stream_handler on instance, calling it")
             asyncio.run(instance.stream_handler(obj))  # type: ignore
             return
         frame = frame.f_back
 
-    logging.info(f"🔍 write_client_stream() NO STREAM HANDLER FOUND!")
+    # No stream handler found - this is expected in some cases
 
 
 def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
@@ -229,6 +216,15 @@ class Helpers():
                 default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
                 default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='bedrock', default=4096),
                 region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
+            )
+        elif executor_name == 'response':
+            from llmvm.common.response_executor import ResponseExecutor
+            executor_instance = ResponseExecutor(
+                api_key=api_key or os.environ.get('OPENAI_API_KEY', ''),
+                default_model=default_model_config,
+                api_endpoint=api_endpoint or Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
+                default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='response', default=4000000),
+                default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='response', default=128000),
             )
         else:
             # openai is the only one we'd change the api_endpoint for, given everyone provides

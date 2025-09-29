@@ -2,12 +2,17 @@
 import asyncio
 import os
 import sys
+import threading
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.input import create_input
+from prompt_toolkit.keys import Keys
 
 from .config import Config
 from .keybindings import create_keybindings, KeyHandler
-from .renderer import Renderer
+from .rich_live_renderer import RichLiveRenderer
+from .debug_renderer import DebugRenderer
+from .stream_renderer import StreamRenderer
 from .server_proxy import ServerProxy
 from .slash_commands import SlashCommandHandler
 
@@ -18,7 +23,15 @@ class SimpleClient:
     def __init__(self):
         self.config = Config.from_env()
         self.server = ServerProxy(self.config)
-        self.renderer = Renderer(self.config)
+
+        # Choose renderer based on environment variables
+        if os.environ.get('DEBUG_RENDERER'):
+            self.renderer = DebugRenderer(self.config)
+        elif os.environ.get('STREAM_RENDERER'):
+            self.renderer = StreamRenderer(self.config)
+        else:
+            self.renderer = StreamRenderer(self.config)
+
         self.key_handler = KeyHandler(self)
         self.keybindings = create_keybindings(self.key_handler)
         self.slash_handler = SlashCommandHandler(self)
@@ -46,9 +59,28 @@ class SimpleClient:
 
         self.should_exit = False
 
+    def _setup_signal_handlers(self):
+        """Setup signal handlers for Ctrl-C"""
+        if not sys.stdin.isatty():
+            return
+
+        import signal
+
+        def handle_sigint(signum, frame):
+            if self.server.is_streaming:
+                self.server.interrupt()
+                self.renderer.show_message("⏹️  Streaming interrupted", style="yellow")
+            else:
+                self.renderer.show_interrupt_hint()
+
+        signal.signal(signal.SIGINT, handle_sigint)
+
     def run(self):
         """Main REPL loop"""
         self.renderer.show_welcome()
+
+        # Setup signal handlers for Ctrl-C
+        self._setup_signal_handlers()
 
         # Check server connectivity
         if not asyncio.run(self.check_server()):
@@ -117,6 +149,7 @@ class SimpleClient:
                 self.renderer.render_error(str(e))
                 continue
 
+
         self.renderer.show_goodbye()
         return 0
 
@@ -144,6 +177,7 @@ class SimpleClient:
 
             async for chunk in self.server.stream_chat(message):
                 response_received = True
+
 
                 if chunk.type == "text":
                     self.renderer.render_text(chunk.content)
@@ -177,6 +211,7 @@ class SimpleClient:
                     self.config.debug_print(f"Unknown chunk type: {chunk.type}")
                     self.renderer.render_text(str(chunk.content))
 
+
             # Finish the response
             if response_received:
                 self.config.log_to_file("[CLIENT] Response completed")
@@ -197,6 +232,7 @@ class SimpleClient:
         """Called by keybindings to exit"""
         self.config.debug_print("Exit requested")
         self.should_exit = True
+
 
     def interrupt_current_request(self):
         """Interrupt current streaming request"""

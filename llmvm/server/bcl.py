@@ -20,6 +20,11 @@ from llmvm.common.objects import FunctionCallMeta, ImageContent, StreamNode, Tex
 from llmvm.server.base_library.source import Source
 from llmvm.server.bash_helper import execute_bash_command, BashResult
 
+try:
+    import ripgrepy
+except ImportError:
+    ripgrepy = None
+
 logging = setup_logging()
 
 
@@ -403,7 +408,14 @@ class BCL():
             ...
         ]
         """
-        # Initialize ripgrep command
+        # Use ripgrepy if available
+        if ripgrepy:
+            return BCL._find_with_ripgrepy(
+                pattern, paths, file_patterns, ignore_case,
+                word_regexp, max_depth, max_results
+            )
+
+        # Fallback to subprocess with rg command
         cmd = ["rg"]
 
         # Add basic arguments
@@ -453,7 +465,7 @@ class BCL():
 
             if result.returncode != 0 and result.returncode != 1:  # 1 means no matches, which is valid
                 if "not found" in result.stderr:
-                    raise RuntimeError("ripgrep (rg) is not installed or not in PATH")
+                    raise RuntimeError("ripgrep (rg) is not installed. Install llmvm with: pip install llmvm-cli")
                 else:
                     raise RuntimeError(f"ripgrep error: {result.stderr} called via cmd: {cmd}")
 
@@ -480,7 +492,68 @@ class BCL():
                         continue
             return output
         except FileNotFoundError:
-            raise RuntimeError("ripgrep (rg) is not installed or not in PATH")
+            raise RuntimeError("ripgrep (rg) is not installed. Install llmvm with: pip install llmvm-cli")
+
+    @staticmethod
+    def _find_with_ripgrepy(
+        pattern: str,
+        paths: Union[str, List[str]] = ".",
+        file_patterns: Union[str, List[str], None] = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+        max_depth: Optional[int] = None,
+        max_results: Optional[int] = None
+    ) -> List[Dict]:
+        """Use ripgrepy Python library for searching."""
+        import ripgrepy
+
+        # Convert paths to list
+        if isinstance(paths, str):
+            paths = [os.path.expanduser(paths)]
+        else:
+            paths = [os.path.expanduser(p) for p in paths]
+
+        # Build ripgrepy search object
+        rg = ripgrepy.Ripgrepy(pattern, *paths)
+
+        if ignore_case:
+            rg = rg.i()  # case insensitive
+        if word_regexp:
+            rg = rg.w()  # word boundaries
+        if max_depth:
+            rg = rg.max_depth(max_depth)
+        if file_patterns:
+            if isinstance(file_patterns, str):
+                file_patterns = [file_patterns]
+            for glob_pattern in file_patterns:
+                if glob_pattern.startswith('.'):
+                    glob_pattern = '*' + glob_pattern
+                rg = rg.glob(glob_pattern)
+
+        # Execute search and collect results
+        output = []
+        try:
+            for match in rg:
+                if match.file and match.line:
+                    output.append({
+                        'file': str(match.file.path),
+                        'line': match.line.line_number,
+                        'column': match.line.column if hasattr(match.line, 'column') else 1,
+                        'match': match.match.match,
+                        'snippet': match.line.text.strip() if match.line.text else '',
+                        'submatches': [{
+                            'match': match.match.match,
+                            'start': match.match.start if hasattr(match.match, 'start') else 0,
+                            'end': match.match.end if hasattr(match.match, 'end') else len(match.match.match)
+                        }]
+                    })
+                    if max_results and len(output) >= max_results:
+                        break
+        except Exception as e:
+            # No matches or error - return empty list
+            logging.debug(f"ripgrepy search error: {e}")
+
+        return output
 
     @staticmethod
     def search_and_replace(text: str, search: str, replace: str) -> str:
@@ -611,49 +684,29 @@ class BCL():
              sandbox_mode: Optional[str] = None,
              justification: str = None):
         """
-        Execute a bash command with approval and sandboxing.
+        Execute a bash command with sandboxing.
 
-        This function provides safe bash command execution with configurable approval
-        and sandboxing mechanisms. Safe commands (ls, cat, echo, etc.) are typically
-        auto-approved, while potentially dangerous commands require explicit approval.
+        This function provides bash command execution with configurable sandboxing.
+        Approval functionality will be added in a future update.
 
         Args:
             command: The bash command to execute
             timeout: Timeout in milliseconds (uses config default if None)
-            approval_mode: "never", "on_request", "on_failure", "unless_trusted" (uses config default if None)
+            approval_mode: Reserved for future use (currently ignored)
             sandbox_mode: "read_only", "workspace_write", "danger_full_access" (uses config default if None)
-            justification: Reason for executing this command (helps with approval decisions)
+            justification: Reason for executing this command (for logging purposes)
 
         Returns:
-            The return value should NEVER be accessed directly. Always pass it to result() immediately.
-
-        IMPORTANT: Always use this pattern:
-            result(BCL.bash("your_command", justification="why you need this"))
-
-        NEVER do this:
-            bash_result = BCL.bash("command")
-            if bash_result.exit_code == 0:  # ❌ WRONG - may fail
-                print(bash_result.stdout)
-
-        The return type is implementation-specific and may be BashResult or ApprovalRequest
-        depending on whether approval is needed. Let the result() function handle it properly.
+            BashResult object with command output
 
         Examples:
-            # Correct usage - always use result()
-            result(BCL.bash("ls -la", justification="List files"))
-
-            result(BCL.bash("cat config.txt",
-                           justification="Reading configuration for analysis"))
-
-            result(BCL.bash("rm temp_file.txt",
-                           approval_mode="unless_trusted",
-                           justification="Cleaning up temporary files"))
+            result(BCL.bash("ls -la"))
+            result(BCL.bash("cat config.txt"))
+            result(BCL.bash("rm temp_file.txt"))
         """
-        from llmvm.server.bash_helper import CommandSafetyAssessor, ApprovalSystem
         from llmvm.common.container import Container
-        import sys
 
-        logging.debug(f"BCL.bash('{command}', timeout={timeout}, approval_mode={approval_mode})")
+        logging.debug(f"BCL.bash('{command}', timeout={timeout})")
 
         cwd = os.getcwd()
 
@@ -665,67 +718,21 @@ class BCL():
             else:
                 config = {}
             timeout = timeout if timeout is not None else config.get('default_timeout', 10000)
-            approval_mode = approval_mode if approval_mode is not None else config.get('default_approval_mode', 'on_request')
             sandbox_mode = sandbox_mode if sandbox_mode is not None else config.get('default_sandbox_mode', 'workspace_write')
         except (ValueError, FileNotFoundError):
             timeout = timeout if timeout is not None else 10000
-            approval_mode = approval_mode if approval_mode is not None else 'on_request'
             sandbox_mode = sandbox_mode if sandbox_mode is not None else 'workspace_write'
 
-        # Check if approval is needed
-        safety_assessor = CommandSafetyAssessor()
-        approval_system = ApprovalSystem()
-
-        needs_approval = False
-        if approval_mode == "never":
-            needs_approval = False
-        elif approval_mode == "unless_trusted":
-            needs_approval = not safety_assessor.is_known_safe(command)
-        elif approval_mode == "on_request":
-            needs_approval = safety_assessor.needs_approval(command)
-        elif approval_mode == "on_failure":
-            needs_approval = False
-
-        # Check session approval cache
-        if needs_approval and approval_system.session_approvals:
-            if command in approval_system.approved_commands:
-                needs_approval = False
-                logging.debug(f"Command '{command}' already approved for session")
-
-        # If approval is needed, check if we're in interactive mode
-        if needs_approval:
-            if not sys.stdin.isatty() or not sys.stdout.isatty():
-                # In server mode - return ApprovalRequest for execution controller to handle
-                logging.debug(f"Command '{command}' requires approval in server mode")
-                from llmvm.common.objects import ApprovalRequest
-
-                approval_request = ApprovalRequest(
-                    command=command,
-                    working_directory=cwd,
-                    justification=justification or "",
-                    session_id=""
-                )
-
-                # LOG: Debug ApprovalRequest creation
-                logging.info(f"🔍 BCL.bash() APPROVAL PATH: created ApprovalRequest")
-                logging.info(f"🔍   command='{approval_request.command}'")
-                logging.info(f"🔍   content_type='{approval_request.content_type}'")
-                logging.info(f"🔍   type={type(approval_request).__name__}")
-
-                # Return ApprovalRequest - execution controller will handle the approval flow
-                return approval_request
-
-        # Execute the command (either no approval needed, or we're in interactive mode)
+        # Always execute the command directly (no approval for now)
         result = execute_bash_command(
             command=command,
             timeout=timeout,
-            approval_mode=approval_mode,
+            approval_mode="never",  # Always bypass approval for now
             sandbox_mode=sandbox_mode,
             justification=justification,
             cwd=cwd
         )
 
-        # LOG: Debug normal execution result
-        logging.info(f"🔍 BCL.bash() EXECUTION PATH: returning {type(result).__name__}")
+        logging.debug(f"BCL.bash() executed: {type(result).__name__}")
 
         return result

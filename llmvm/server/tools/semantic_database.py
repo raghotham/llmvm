@@ -277,23 +277,36 @@ The database semantic knowledge is now available for intelligent querying and an
             client = SemanticDatabaseHelpers._get_openai_client()
             vector_store_id = SemanticDatabaseHelpers._vector_store_cache[cache_key]['vector_store_id']
 
-            # Search the vector store directly
+            # Search the vector store directly using the search method
             search_results = client.vector_stores.search(
                 vector_store_id=vector_store_id,
                 query=natural_language_query,
-                max_num_results=5
+                max_num_results=5  # Return top 5 results
             )
 
-            # Extract relevant context from search results
+            # Extract and format the search results
+            if not search_results or not hasattr(search_results, 'data'):
+                return "No relevant semantic context found for this query."
+
             context_chunks = []
-            for result in search_results.data:
-                context_chunks.append(f"Score: {result.score:.3f}\n{result.content}")
+            for i, result in enumerate(search_results.data, 1):
+                # Format each result with score and content
+                score = getattr(result, 'score', 0.0) if hasattr(result, 'score') else 0.0
+                content = getattr(result, 'content', '') if hasattr(result, 'content') else str(result)
+
+                context_chunks.append(f"### Result {i} (Score: {score:.3f})\n{content}")
 
             if not context_chunks:
                 return "No relevant semantic context found for this query."
 
             context = "\n\n---\n\n".join(context_chunks)
-            return f"Semantic database context for: '{natural_language_query}'\n\n{context}"
+
+            db_name = SemanticDatabaseHelpers._vector_store_cache[cache_key].get('db_name', 'Unknown')
+
+            return f"""Semantic database context for: '{natural_language_query}'
+Database: {db_name}
+
+{context}"""
 
         except Exception as e:
             return f"Error searching semantic context: {str(e)}"

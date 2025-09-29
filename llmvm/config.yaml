@@ -1,127 +1,19 @@
-# install in ~/.config/llmvm/config.yaml
-# or set LLMVM_CONFIG environment variable to this file
-server_host: '0.0.0.0'
-server_port: 8011
-profiling: false
-profiling_file: '~/.local/share/llmvm/profiling_trace.log'
-executor_trace: '~/.local/share/llmvm/executor.trace'
-chromium_headless: true
-chromium_cookies: '~/.local/share/llmvm/cookies.txt'
-cache_directory: '~/.local/share/llmvm/cache'
-log_directory: '~/.local/share/llmvm/logs'
-memory_directory: '~/.local/share/llmvm/memory'
-todo_file: '~/.local/share/llmvm/todo.md'
-openai_api_base: 'https://api.openai.com/v1'
-anthropic_api_base: 'https://api.anthropic.com'
-deepseek_api_base: 'https://api.deepseek.com/v1'
-gemini_api_base: 'https://generativelanguage.googleapis.com/v1beta'
-bedrock_api_base: 'us-east-1'
-default_openai_model: 'gpt-5'
-default_anthropic_model: 'claude-sonnet-4-20250514'
-default_gemini_model: 'gemini-2.5-pro'
-default_deepseek_model: 'deepseek-chat'
-default_bedrock_model: 'amazon.nova-pro-v1:0'
-executor: 'anthropic'  # openai, anthropic, gemini, deepseek, bedrock
-override_max_input_tokens: None
-override_max_output_tokens: None
-full_processing: true
+# Minimal LLMVM configuration
+# Place in ~/.config/llmvm/config.yaml or set LLMVM_CONFIG environment variable
 
+# Core settings (only include if different from defaults)
+# executor: 'anthropic'  # Default is 'response' as of latest changes
+
+# Only include helper functions that you want to enable
+# Most are already enabled by default in the code
 helper_functions:
-  # - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
-  # - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
-  # - llmvm.server.tools.webhelpers.WebHelpers.get_hackernews_latest
-  # - llmvm.server.tools.edgar.EdgarHelpers.get_filings
-  # - llmvm.server.tools.edgar.EdgarHelpers.get_form_filing_or_item_url_as_markdown
-  # - llmvm.server.tools.edgar.EdgarHelpers.get_latest_filing_as_markdown
-  # - llmvm.server.tools.market.MarketHelpers.get_stock_price
-  # - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
-  # - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
-  # - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
-  # - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
-  # - llmvm.server.tools.market.MarketHelpers.get_options_chain
-  - llmvm.server.bcl.BCL.datetime
-  - llmvm.server.bcl.BCL.sample_normal
-  - llmvm.server.bcl.BCL.sample_binomial
-  - llmvm.server.bcl.BCL.sample_lognormal
-  - llmvm.server.bcl.BCL.sample_list
-  - llmvm.server.bcl.BCL.generate_graph_image
-  - llmvm.server.bcl.BCL.matplotlib_to_image
-  - llmvm.server.bcl.BCL.get_source_code_structure_summary
-  - llmvm.server.bcl.BCL.get_source_code
-  - llmvm.server.bcl.BCL.find_all_references_to_method
-  - llmvm.server.bcl.BCL.get_weather
-  - llmvm.server.bcl.BCL.address_lat_lon
-  # - llmvm.server.bcl.BCL.get_currency_rates
-  # - llmvm.server.bcl.BCL.get_gold_silver_price_in_usd
-  # - llmvm.server.bcl.BCL.get_bitcoin_prices_in_usd
-  # - llmvm.server.bcl.BCL.get_central_bank_rates
-  # - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
-  - llmvm.server.bcl.BCL.search_and_replace
-  - llmvm.server.bcl.BCL.find
-  - llmvm.server.bcl.BCL.bash
   - llmvm.server.tools.browser.Browser
   - llmvm.server.tools.sheets.GoogleSheetsManager
-  - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
   - llmvm.server.tools.search_tool.Search.google_search
-  # - llmvm.server.tools.search_tool.Search.google_patent_search
-  # - llmvm.server.tools.search_tool.Search.bluesky_search
-  # - llmvm.server.tools.search_tool.Search.yelp_search
-  # - llmvm.server.tools.search_tool.Search.hackernews_search
   - llmvm.server.tools.database.DatabaseHelpers.connect_database
   - llmvm.server.tools.database.DatabaseHelpers.query_database
-  - llmvm.server.tools.database.DatabaseHelpers.get_database_schema
-  - llmvm.server.tools.database.DatabaseHelpers.get_business_context
-  - llmvm.server.tools.database.DatabaseHelpers.suggest_analysis_queries
-  - llmvm.server.tools.database.DatabaseHelpers.add_insight
-  - llmvm.server.tools.database.DatabaseHelpers.clear_cache
   - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.create_semantic_understanding
-  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.get_semantic_context
-  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.generate_verification_queries
-  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.get_semantic_suggestions
-  - llmvm.server.tools.semantic_database.SemanticDatabaseHelpers.clear_semantic_cache
 
-# optional client color Python rich syntax
-client_stream_token_color: 'dim'
-client_stream_thinking_token_color: 'gray'
-client_role_color: 'bold bright_blue'
-client_repl_color: 'ansibrightblue'
-client_assistant_color: 'default'
-client_markdown_inline: true
-
-# bash helper configuration
-bash_helper:
-  default_approval_mode: 'on_request'  # never, on_request, on_failure, unless_trusted
-  default_sandbox_mode: 'workspace_write'  # read_only, workspace_write, danger_full_access
-  default_timeout: 10000  # milliseconds
-  session_approvals: true  # remember approvals for session
-  known_safe_commands:
-    - 'ls'
-    - 'cat'
-    - 'head'
-    - 'tail'
-    - 'grep'
-    - 'find'
-    - 'pwd'
-    - 'echo'
-    - 'which'
-    - 'whereis'
-    - 'date'
-    - 'whoami'
-    - 'id'
-    - 'uname'
-    - 'uptime'
-  dangerous_commands:
-    - 'rm'
-    - 'rmdir'
-    - 'mv'
-    - 'cp'
-    - 'dd'
-    - 'mkfs'
-    - 'fdisk'
-    - 'mount'
-    - 'umount'
-    - 'chmod'
-    - 'chown'
-    - 'su'
-    - 'sudo'
-    - 'passwd'
+# Bash helper settings (if you want to change defaults)
+# bash_helper:
+#   default_approval_mode: 'on_request'  # Default behavior

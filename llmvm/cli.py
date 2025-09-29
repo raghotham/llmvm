@@ -293,8 +293,8 @@ class LLMVMManager:
         log_info("Starting LLMVM client...")
 
         try:
-            # Default to simple client, unless explicitly set to advanced
-            client_type = os.environ.get("LLMVM_CLIENT", "simple").lower()
+            # Default to pane client, unless explicitly set to simple or advanced
+            client_type = os.environ.get("LLMVM_CLIENT", "pane").lower()
 
             # Set up environment for client
             original_endpoint = os.environ.get("LLMVM_ENDPOINT")
@@ -308,13 +308,25 @@ class LLMVMManager:
                 subprocess.run(
                     cmd, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, env=env
                 )
-            else:
-                # Use simple client directly (default)
+            elif client_type == "simple":
+                # Use simple client directly (opt-in)
                 log_info("Using simple client")
                 from llmvm.client_simple.client import SimpleClient
 
                 # Create and run simple client directly
                 client = SimpleClient()
+                exit_code = client.run()
+
+                # Handle exit code if needed
+                if exit_code != 0:
+                    log_warning(f"Client exited with code {exit_code}")
+            else:
+                # Use pane client directly (default)
+                log_info("Using pane client")
+                from llmvm.client_pane.client import PaneClient
+
+                # Create and run pane client directly
+                client = PaneClient()
                 exit_code = client.run()
 
                 # Handle exit code if needed

@@ -742,13 +742,10 @@ class HackerNewsResult(TextContent):
         json_result['comment_text'] = self.comment_text
         return json_result
 
+# ApprovalRequest class - Temporarily disabled, will be re-enabled in a future update
+# Keeping as stub to prevent import errors
 class ApprovalRequest(TextContent):
-    """Content type for bash command approval requests.
-
-    Used when a bash command requires user approval. Instead of blocking
-    on terminal I/O, the bash helper returns this Content type which can
-    be handled by the execution controller and client.
-    """
+    """Stub class for ApprovalRequest - approval functionality temporarily disabled"""
     def __init__(
         self,
         command: str,
@@ -756,55 +753,32 @@ class ApprovalRequest(TextContent):
         justification: str = '',
         session_id: str = '',
     ):
-        # Create descriptive sequence text
-        sequence = f"ApprovalRequest(command='{command}', working_directory='{working_directory}', justification='{justification}')"
-        super().__init__(sequence, url='')
-
-        # Set fields AFTER parent init to ensure they're preserved
+        # Just create as TextContent for now
+        super().__init__(f"Command: {command}", url='')
         self.command = command
         self.working_directory = working_directory
         self.justification = justification
         self.session_id = session_id
-        self.execution_id = ""  # Will be set by BCL.bash() when using approval registry
-        # Override content_type to "approval_request" for proper identification
-        self.content_type = "approval_request"
+        self.execution_id = ""
+        self.content_type = "text"  # Use text instead of approval_request
 
     def get_str(self) -> str:
-        return f"APPROVAL_REQUEST: Command '{self.command}' in '{self.working_directory}' requires approval. Justification: {self.justification}"
+        return f"Command: {self.command}"
 
     def __str__(self):
         return self.get_str()
 
     def to_json(self) -> dict:
-        json_result = super().to_json()
-        json_result['command'] = self.command
-        json_result['working_directory'] = self.working_directory
-        json_result['justification'] = self.justification
-        json_result['session_id'] = self.session_id
-        json_result['execution_id'] = self.execution_id
-        json_result['content_type'] = 'approval_request'
-        return json_result
+        return super().to_json()
 
     @classmethod
     def from_json(cls, data: dict) -> 'ApprovalRequest':
-        # Debug: log the data structure being deserialized
-        import logging
-        logging.debug(f"ApprovalRequest.from_json received data: {data}")
-
-        # Require proper serialization - no backward compatibility hacks
-        if 'command' not in data:
-            logging.error(f"ApprovalRequest.from_json missing 'command' field in data: {data}")
-            raise ValueError(f"ApprovalRequest serialization is broken. Missing required 'command' field. Got keys: {list(data.keys())}")
-
-        approval_request = cls(
-            command=data['command'],
+        return cls(
+            command=data.get('command', ''),
             working_directory=data.get('working_directory', ''),
             justification=data.get('justification', ''),
             session_id=data.get('session_id', ''),
         )
-        # Set execution_id after creation
-        approval_request.execution_id = data.get('execution_id', '')
-        return approval_request
 
 
 class Message(AstNode):
@@ -1506,6 +1480,116 @@ class DebugNode(AstNode):
 
     def __repr__(self):
         return 'DebugNode()'
+
+
+class InferenceStartNode(AstNode):
+    def __init__(
+        self,
+        model: str,
+        prompt_tokens: int = 0,
+        request_id: str = "",
+    ):
+        super().__init__()
+        self.model = model
+        self.prompt_tokens = prompt_tokens
+        self.request_id = request_id
+        self.timestamp = time.time()
+
+    def __str__(self):
+        return '<inference-started>\n'
+
+    def __repr__(self):
+        return f'InferenceStartNode(model={self.model}, prompt_tokens={self.prompt_tokens})'
+
+
+class InferenceEndNode(AstNode):
+    def __init__(
+        self,
+        success: bool,
+        duration: float,
+        total_tokens: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        error: str = "",
+    ):
+        super().__init__()
+        self.success = success
+        self.duration = duration
+        self.total_tokens = total_tokens
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.error = error
+        self.timestamp = time.time()
+
+    def __str__(self):
+        if self.success:
+            return '<inference-succeeded>\n'
+        else:
+            return '<inference-failed>\n'
+
+    def __repr__(self):
+        return f'InferenceEndNode(success={self.success}, duration={self.duration})'
+
+
+class HelpersExtractedNode(AstNode):
+    def __init__(
+        self,
+        code_blocks: list[str],
+        total_blocks: int,
+    ):
+        super().__init__()
+        self.code_blocks = code_blocks
+        self.total_blocks = total_blocks
+        self.timestamp = time.time()
+
+    def __str__(self):
+        return f'<helpers-extracted count="{self.total_blocks}">\n'
+
+    def __repr__(self):
+        return f'HelpersExtractedNode(total_blocks={self.total_blocks})'
+
+
+class HelpersExecutionStartNode(AstNode):
+    def __init__(
+        self,
+        code_block: str,
+        block_index: int = 0,
+    ):
+        super().__init__()
+        self.code_block = code_block
+        self.block_index = block_index
+        self.timestamp = time.time()
+
+    def __str__(self):
+        return '<helpers-execution-started>\n'
+
+    def __repr__(self):
+        return f'HelpersExecutionStartNode(block_index={self.block_index})'
+
+
+class HelpersExecutionEndNode(AstNode):
+    def __init__(
+        self,
+        success: bool,
+        result: str = "",
+        error: str = "",
+        duration: float = 0.0,
+    ):
+        super().__init__()
+        self.success = success
+        self.result = result
+        self.error = error
+        self.duration = duration
+        self.timestamp = time.time()
+
+    def __str__(self):
+        if self.success:
+            return '<helpers-execution-succeeded>\n'
+        else:
+            return '<helpers-execution-failed>\n'
+
+    def __repr__(self):
+        return f'HelpersExecutionEndNode(success={self.success}, duration={self.duration})'
 
 
 class Statement(AstNode):

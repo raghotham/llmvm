@@ -385,9 +385,11 @@ class AnthropicExecutor(Executor):
         async with await stream as stream_async:  # type: ignore
             async for token in stream_async:
                 if token.thinking:
+                    logging.debug(f"anthropic_executor: thinking chunk: '{token.token}'")
                     await stream_handler(TokenThinkingNode(token.token))
                     thinking_response += token.token
                 else:
+                    logging.debug(f"anthropic_executor: text chunk: '{token.token}'")
                     await stream_handler(TokenNode(token.token))
                     text_response += token.token
 

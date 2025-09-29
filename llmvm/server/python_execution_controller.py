@@ -3,6 +3,7 @@ import asyncio
 import copy
 import datetime
 import math
+import time
 # required for the prompt
 import tzlocal
 import random
@@ -29,6 +30,11 @@ from llmvm.common.objects import (
     FileContent,
     FunctionCall,
     FunctionCallMeta,
+    HelpersExecutionEndNode,
+    HelpersExecutionStartNode,
+    HelpersExtractedNode,
+    InferenceEndNode,
+    InferenceStartNode,
     LLMCall,
     MarkdownContent,
     Message,
@@ -87,6 +93,15 @@ class ExecutionController(Controller):
         if llm_call.user_message.get_str().strip() != "":
             messages.append(llm_call.user_message)
 
+        # Send inference start event
+        prompt_tokens = await llm_call.executor.count_tokens(messages)
+        write_client_stream(InferenceStartNode(
+            model=llm_call.model or llm_call.executor.default_model,
+            prompt_tokens=prompt_tokens,
+            request_id=getattr(llm_call, 'request_id', '')
+        ))
+
+        start_time = time.time()
         try:
             assistant: Assistant = await llm_call.executor.aexecute(
                 messages,
@@ -97,11 +112,28 @@ class ExecutionController(Controller):
                 thinking=llm_call.thinking,
                 stream_handler=llm_call.stream_handler,
             )
+
+            # Send inference end event (success)
+            write_client_stream(InferenceEndNode(
+                success=True,
+                duration=time.time() - start_time,
+                total_tokens=getattr(assistant, 'total_tokens', 0),
+                input_tokens=getattr(assistant, 'input_tokens', 0),
+                output_tokens=getattr(assistant, 'output_tokens', 0)
+            ))
+
             role_debug(
                 logging, llm_call.prompt_name, "User", llm_call.user_message.get_str()
             )
             role_debug(logging, llm_call.prompt_name, "Assistant", assistant.get_str())
         except Exception as ex:
+            # Send inference end event (failure)
+            write_client_stream(InferenceEndNode(
+                success=False,
+                duration=time.time() - start_time,
+                error=str(ex)
+            ))
+
             role_debug(
                 logging, llm_call.prompt_name, "User", llm_call.user_message.get_str()
             )
@@ -1123,6 +1155,14 @@ class ExecutionController(Controller):
             code_blocks: list[str] = PythonRuntimeHost.get_helpers_code_blocks(
                 assistant_response_str
             )
+
+            # Send helpers extracted event if code blocks were found
+            if code_blocks:
+                write_client_stream(HelpersExtractedNode(
+                    code_blocks=code_blocks,
+                    total_blocks=len(code_blocks)
+                ))
+
             code_blocks_remove = []
 
             # filter code_blocks we've already seen
@@ -1140,15 +1180,22 @@ class ExecutionController(Controller):
             if code_blocks and not response.stop_token == "</complete>":
                 # emit some debugging
                 code_block = "\n".join(code_blocks)
-                if not (
-                    self.get_executor().name() == "openai"
-                    and cast(OpenAIExecutor, self.get_executor()).does_not_stop(model)
-                ):
-                    write_client_stream(TokenNode("</helpers>\n"))
+                # The LLM already includes </helpers> in its response, so we don't need to add it again
+                # if not (
+                #     self.get_executor().name() == "openai"
+                #     and cast(OpenAIExecutor, self.get_executor()).does_not_stop(model)
+                # ):
+                #     write_client_stream(TokenNode("</helpers>\n"))
 
                 write_client_stream(
                     TextContent("Executing helpers code block locally.\n")
                 )
+
+                # Send helpers execution start event
+                write_client_stream(HelpersExecutionStartNode(
+                    code_block=code_block,
+                    block_index=len(code_blocks_executed)
+                ))
 
                 no_indent_debug(logging, "")
                 no_indent_debug(
@@ -1200,6 +1247,7 @@ class ExecutionController(Controller):
                 hidden = False
                 answers = []
 
+                execution_start_time = time.time()
                 try:
                     # here we're using the original messages list because messages() wouldn't work without
                     # the original. we append the response to this messages list later in the code.
@@ -1210,11 +1258,25 @@ class ExecutionController(Controller):
                         runtime_state=runtime_state,
                     )
 
+                    # Send helpers execution end event (success)
+                    write_client_stream(HelpersExecutionEndNode(
+                        success=True,
+                        result=str(answers) if answers else "",
+                        duration=time.time() - execution_start_time
+                    ))
+
                     # Python was executed without exceptions, reset the exception counter
                     # and add any result() results to the results list
                     exception_counter = 0
                     code_blocks_executed.append(code_block)
                 except Exception as ex:
+                    # Send helpers execution end event (failure)
+                    write_client_stream(HelpersExecutionEndNode(
+                        success=False,
+                        error=str(ex),
+                        duration=time.time() - execution_start_time
+                    ))
+
                     # we call the assistant again, and the string will often contain the original code block
                     # even though we got an exception, we want to make sure we specify that we've executed it
                     code_blocks_executed.append(code_block)
@@ -1274,47 +1336,6 @@ class ExecutionController(Controller):
                     and len(code_execution_result) > 0
                 )
 
-                # Handle ApprovalRequest - pause execution and wait for approval
-                from llmvm.common.objects import ApprovalRequest
-                approval_requests = [c for c in code_execution_result if isinstance(c, ApprovalRequest)]
-
-                if approval_requests:
-                    # For now, handle only the first approval request (can be extended later)
-                    approval_request = approval_requests[0]
-                    logging.info(f"🔍 EXECUTION CONTROLLER: Found ApprovalRequest: {approval_request.command}")
-
-                    # Store execution context for later resumption
-                    from llmvm.server.execution_continuation import ExecutionContinuationRegistry
-                    registry = ExecutionContinuationRegistry()
-
-                    execution_id = registry.pause_execution(
-                        approval_request=approval_request,
-                        code_execution_result=code_execution_result,
-                        runtime_state=runtime_state,
-                        messages=messages_copy,
-                        # Original request context
-                        thread_id=getattr(self, 'thread_id', 0),
-                        temperature=temperature,
-                        model=model or "gpt-5",
-                        max_output_tokens=max_output_tokens,
-                        compression=compression,
-                        cookies=cookies,
-                        helpers=helpers,
-                        template_args=template_args,
-                        thinking=getattr(self, 'thinking', False),
-                        # Response handling
-                        stream_handler=stream_handler,
-                        original_queue=getattr(self, 'response_queue', None),
-                        original_controller=self
-                    )
-
-                    # Stream ApprovalRequest to client with execution_id
-                    logging.info(f"🔍   Streaming ApprovalRequest to client with execution_id: {execution_id}")
-                    write_client_stream(approval_request)
-
-                    # Return empty message list - execution paused until approval
-                    logging.info(f"🔍 EXECUTION CONTROLLER: Execution paused, waiting for approval")
-                    return ([], runtime_state)
 
                 # Normal processing for non-approval results
                 # todo: this should be AstNode or TextNode or ...
@@ -1324,19 +1345,12 @@ class ExecutionController(Controller):
                 )
 
                 # we have a <helpers_result></helpers_result> block, push it to the cli client
-                if len(code_execution_result_str) > 300 and not 'An exception occured' in code_execution_result_str and not '<ast>' in code_execution_result_str:
-                    # grab the first and last 150 characters
-                    write_client_stream(
-                        TokenNode(
-                            f"<helpers_result>{code_execution_result_str[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result_str[-150:]}</helpers_result>\n\n"
-                        )
+                # Always send the full result to the client, no truncation
+                write_client_stream(
+                    TokenNode(
+                        f"<helpers_result>{code_execution_result_str}</helpers_result>\n\n"
                     )
-                else:
-                    write_client_stream(
-                        TokenNode(
-                            f"<helpers_result>{code_execution_result_str}</helpers_result>\n\n"
-                        )
-                    )
+                )
 
                 # todo: we're using a string here to embed the result in the helpers_result
                 # but I think we can probably have all sorts of stuff in here, including images.

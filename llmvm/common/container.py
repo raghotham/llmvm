@@ -1,6 +1,7 @@
 import inspect
 import os
-from typing import Any, Type, cast
+from pathlib import Path
+from typing import Any, Type, cast, Dict
 
 import yaml
 
@@ -20,19 +21,36 @@ class Container(metaclass=Singleton):
             config_file: str = os.path.expanduser('~/.config/llmvm/config.yaml'),
             throw: bool = True
         ):
+        # First, load the default configuration
+        default_config_path = Path(__file__).parent.parent / 'default_config.yaml'
+        if default_config_path.exists():
+            with open(default_config_path, 'r') as default_conf:
+                self.configuration: Dict[str, Any] = yaml.load(default_conf, Loader=yaml.FullLoader) or {}
+        else:
+            self.configuration = {}
+
         self.config_file = config_file
+        self.type_instance_cache: dict[Type, object] = {}
 
         if os.getenv('LLMVM_CONFIG'):
             self.config_file = cast(str, os.getenv('LLMVM_CONFIG'))
 
-        if not os.path.exists(self.config_file) and throw:
+        # Load user config if it exists and merge with defaults
+        if os.path.exists(self.config_file):
+            with open(self.config_file, 'r') as conf_file:
+                user_config = yaml.load(conf_file, Loader=yaml.FullLoader) or {}
+                # Deep merge user config over defaults
+                self._deep_merge(self.configuration, user_config)
+        elif not os.path.exists(self.config_file) and throw and not default_config_path.exists():
             raise ValueError('configuration_file {} is not found. Put config in ~/.config/llmvm or set LLMVM_CONFIG'.format(config_file))
-        elif not os.path.exists(self.config_file) and not throw:
-            return
 
-        with open(self.config_file, 'r') as conf_file:
-            self.configuration: dict = yaml.load(conf_file, Loader=yaml.FullLoader)  # type: ignore
-            self.type_instance_cache: dict[Type, object] = {}
+    def _deep_merge(self, base: Dict[str, Any], overlay: Dict[str, Any]) -> None:
+        """Deep merge overlay dict into base dict"""
+        for key, value in overlay.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                self._deep_merge(base[key], value)
+            else:
+                base[key] = value
 
     def resolve(self, t: Type, **extra_args):
         args = {}
@@ -71,7 +89,7 @@ class Container(metaclass=Singleton):
             return self.type_instance_cache[t]
 
     @staticmethod
-    def get_config_variable(name: str, alternate_name: str = '', default: Any = '') -> Any:
+    def get_config_variable(name: str, alternate_name: str = '', default: Any = None) -> Any:
         def parse(value) -> Any:
             if isinstance(value, str) and (value == 'true' or value == 'True'):
                 return True
@@ -96,18 +114,23 @@ class Container(metaclass=Singleton):
         if alternate_name in os.environ:
             return parse(os.environ.get(alternate_name, default))
 
-        # otherwise, try the config file
-        config_file = os.environ.get('LLMVM_CONFIG', default='~/.config/llmvm/config.yaml')
-        if config_file.startswith('~'):
-            config_file = os.path.expanduser(config_file)
+        # Try to get from singleton instance (which has merged defaults)
+        try:
+            container = Container(throw=False)
+            # Check direct name first
+            if container.has(name):
+                return parse(container.get(name))
+            # Check lowercase version without LLMVM_ prefix
+            if container.has(name.replace('LLMVM_', '').lower()):
+                return parse(container.get(name.replace('LLMVM_', '').lower()))
+            # Check alternate name
+            if alternate_name:
+                if container.has(alternate_name):
+                    return parse(container.get(alternate_name))
+                if container.has(alternate_name.replace('LLMVM_', '').lower()):
+                    return parse(container.get(alternate_name.replace('LLMVM_', '').lower()))
+        except:
+            pass
 
-        if not os.path.exists(config_file):
-            return parse(default)
-
-        container = Container(config_file)
-        if container.has(name.replace('LLMVM_', '').lower()):
-            return parse(container.get(name.replace('LLMVM_', '').lower()))
-        elif container.has(alternate_name.replace('LLMVM_', '').lower()):
-            return parse(container.get(alternate_name.replace('LLMVM_', '').lower()))
-        else:
-            return default
+        # If all else fails, use provided default or empty string
+        return parse(default) if default is not None else ''

@@ -181,6 +181,12 @@ class PaneClient:
                 self.stop_streaming = True
                 if self.server and self.server.is_streaming:
                     self.server.interrupt()
+                # Stop spinner immediately
+                self._stop_spinner()
+                # Reset processing flag
+                self.is_processing = False
+                # Clear and reset input area
+                self.input_area.text = ""
                 self.add_content("\n⏹️ Streaming stopped\n")
             else:
                 self.add_content("⏹️ ESC pressed (no active stream)\n")

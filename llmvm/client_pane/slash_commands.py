@@ -22,6 +22,7 @@ class SlashCommandHandler:
             'usage': self._handle_usage,
             'help': self._handle_help,
             'clear': self._handle_clear,
+            'status': self._handle_status,
         }
 
     def is_slash_command(self, user_input: str) -> bool:
@@ -185,6 +186,57 @@ class SlashCommandHandler:
         except Exception as e:
             return CommandResult(success=False, message=f"Failed to clear context: {str(e)}")
 
+    async def _handle_status(self, args: list) -> CommandResult:
+        """Handle /status command - show server and client status"""
+        try:
+            # Get server health
+            async with httpx.AsyncClient() as http_client:
+                response = await http_client.get(
+                    f"{self.client.config.server_url}/health",
+                    timeout=5.0
+                )
+
+                if response.status_code == 200:
+                    health_data = response.json()
+                    status_text = f"Server Status:\n"
+                    status_text += f"  URL: {self.client.config.server_url}\n"
+                    status_text += f"  Status: {health_data.get('status', 'unknown')}\n"
+
+                    # Add session info if available
+                    if self.client.server.thread and hasattr(self.client.server.thread, 'id'):
+                        session_id = self.client.server.thread.id
+                        message_count = len(self.client.server.thread.messages) if hasattr(self.client.server.thread, 'messages') else 0
+                        status_text += f"\nClient Session:\n"
+                        status_text += f"  Session ID: {session_id}\n"
+                        status_text += f"  Messages: {message_count}\n"
+                        status_text += f"  Model: {self.client.config.model}\n"
+                        status_text += f"  Executor: {self.client.config.executor}\n"
+                    else:
+                        status_text += f"\nClient Session:\n"
+                        status_text += f"  Status: No active session\n"
+                        status_text += f"  Model: {self.client.config.model}\n"
+                        status_text += f"  Executor: {self.client.config.executor}\n"
+
+                    # Add history info
+                    history_count = len(self.client.input_history)
+                    status_text += f"\nInput History:\n"
+                    status_text += f"  Commands in history: {history_count}\n"
+
+                    return CommandResult(success=True, message=status_text, data=health_data)
+                else:
+                    return CommandResult(
+                        success=False,
+                        message=f"Server returned status {response.status_code}"
+                    )
+
+        except httpx.ConnectError:
+            return CommandResult(
+                success=False,
+                message=f"Cannot connect to server at {self.client.config.server_url}"
+            )
+        except Exception as e:
+            return CommandResult(success=False, message=f"Status command error: {str(e)}")
+
     async def _handle_help(self, args: list) -> CommandResult:
         """Handle /help command"""
         help_text = """Available slash commands:
@@ -192,6 +244,7 @@ class SlashCommandHandler:
 /usage          - Show token usage for current session
 /usage global   - Show global usage across all sessions
 /clear          - Clear conversation context and start fresh
+/status         - Show server and client status
 /help           - Show this help message
 
 Slash commands are processed locally and don't require server round-trips."""

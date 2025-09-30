@@ -10,7 +10,12 @@ import httpx
 import jsonpickle
 
 # Import the proper data models
-from llmvm.common.objects import SessionThreadModel, MessageModel, User, TextContent, TokenNode, TokenStopNode, StreamingStopNode, StreamNode, QueueBreakNode
+from llmvm.common.objects import (
+    SessionThreadModel, MessageModel, User, TextContent,
+    TokenNode, TokenStopNode, StreamingStopNode, StreamNode, QueueBreakNode,
+    InferenceStartNode, InferenceEndNode,
+    HelpersExtractedNode, HelpersExecutionStartNode, HelpersExecutionEndNode
+)
 
 
 @dataclass
@@ -197,8 +202,22 @@ class ServerProxy:
                         else:
                             # Other stream node types, convert to string
                             return Chunk(type="text", content=str(data.obj))
+                    # Handle event nodes
+                    elif isinstance(data, InferenceStartNode):
+                        return Chunk(type="event", content=data, metadata={"event_type": "inference_start"})
+                    elif isinstance(data, InferenceEndNode):
+                        return Chunk(type="event", content=data, metadata={"event_type": "inference_end"})
+                    elif isinstance(data, HelpersExtractedNode):
+                        return Chunk(type="event", content=data, metadata={"event_type": "helpers_extracted"})
+                    elif isinstance(data, HelpersExecutionStartNode):
+                        return Chunk(type="event", content=data, metadata={"event_type": "helpers_execution_start"})
+                    elif isinstance(data, HelpersExecutionEndNode):
+                        return Chunk(type="event", content=data, metadata={"event_type": "helpers_execution_end"})
                     # Handle LLMVM TokenNode objects
                     elif isinstance(data, TokenNode):
+                        # Check for completion tag
+                        if "</complete>" in data.token:
+                            return Chunk(type="complete", content="</complete>")
                         return Chunk(type="text", content=data.token)
                     elif isinstance(data, (TokenStopNode, StreamingStopNode, QueueBreakNode)):
                         return None  # Stop/break nodes don't produce visible output
